@@ -28,6 +28,14 @@ cd "C:\Users\HOUSS\Downloads\HK_energies-main"
 
 If `npm run dev` shows an `ENOENT` error for `package.json`, you are probably in the parent folder. Move into the inner project folder or use the PowerShell launcher above.
 
+### GitHub Pages deployment
+
+This repository deploys the Vite build from `dist` using GitHub Actions. In GitHub, open **Settings > Pages** and make sure **Source** is set to **GitHub Actions**, not a branch or `/docs` folder. The published URL is:
+
+```text
+https://hbakk.github.io/ocp-IHwork/
+```
+
 ## Backend EMS Simulation Engine
 
 The backend/data layer lives under `src/core` and is designed so OCP Benguerir is one example project rather than hardcoded global logic.
@@ -50,8 +58,8 @@ Preferred annual CSV columns:
 
 ```csv
 timestamp,production_mwh,consumption_mwh
-2025-01-01T00:00:00.000Z,0,25
-2025-01-01T01:00:00.000Z,0,25
+2025-01-01T00:00:00.000Z,0,15
+2025-01-01T01:00:00.000Z,0,15
 ```
 
 Accepted PV production column names:
@@ -126,8 +134,8 @@ data/input/ocp_profile.csv
 
 ```csv
 timestamp,production_mwh,consumption_mwh
-2025-01-01T00:00:00,0,25
-2025-01-01T01:00:00,0,25
+2025-01-01T00:00:00,0,15
+2025-01-01T01:00:00,0,15
 ```
 
 Accepted timestamp columns:

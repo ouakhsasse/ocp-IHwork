@@ -54,7 +54,7 @@
                             <label for="profile_uploader" class="file-input-label"><span>Choose CSV or Excel profile (8760h)</span></label>
                             <input type="file" id="profile_uploader" accept=".csv,.xlsx,.xls">
                             <p id="file-name" class="text-sm mt-2"></p>
-                            <p class="text-xs text-gray-500 mt-1">Required columns: `production_mwh` and `consumption_mwh`. Excel columns such as `La date` and `Production enMWH` are also accepted. If consumption is missing, a constant 25 MWh hourly load can be generated.</p>
+                            <p class="text-xs text-gray-500 mt-1">Required columns: `production_mwh` and `consumption_mwh`. Excel columns such as `La date` and `Production enMWH` are also accepted. If consumption is missing, a constant 15 MWh hourly load can be generated.</p>
                         </div>
                         <div class="mb-6">
                             <h3 class="text-md font-semibold mb-3">PV Installation</h3>
@@ -225,7 +225,7 @@
                     profileData = parsed.profileData;
 
                     if (profileData.length >= 8760) {
-                        const loadMessage = parsed.generatedConstantLoad ? " Missing consumption column: constant 25 MWh hourly load generated." : "";
+                        const loadMessage = parsed.generatedConstantLoad ? " Missing consumption column: constant 15 MWh hourly load generated." : "";
                         const timestampMessage = parsed.generatedHourlyTimestamps ? " Hourly timestamps generated from 2025-01-01T00:00:00." : "";
                         fileNameDisplay.textContent = `${parsed.detectedFormat} profile parsed successfully: ${profileData.length.toLocaleString('en-US')} rows.${timestampMessage}${loadMessage}`;
                         fileNameDisplay.classList.add('text-green-600');

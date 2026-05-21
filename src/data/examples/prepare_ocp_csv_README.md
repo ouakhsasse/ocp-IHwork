@@ -8,9 +8,9 @@ Preferred columns:
 
 ```csv
 timestamp,production_mwh,consumption_mwh
-2025-01-01T00:00:00,0,25
-2025-01-01T01:00:00,0,25
-2025-01-01T12:00:00,42.5,25
+2025-01-01T00:00:00,0,15
+2025-01-01T01:00:00,0,15
+2025-01-01T12:00:00,42.5,15
 ```
 
 ## Export From Excel
