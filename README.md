@@ -2,6 +2,32 @@
 
 Optimisation OCP PV is a PV-BESS and EMS simulation platform for OCP-style industrial energy projects, supporting solar profitability, storage cost analysis, full PV-BESS simulation, and OCP Benguerir EMS studies.
 
+## How to run the project locally
+
+Recommended method:
+
+```powershell
+cd "C:\Users\HOUSS\Downloads\HK_energies-main\HK_energies-main"
+npm install
+npm run dev
+```
+
+Automatic method from the parent download folder:
+
+```powershell
+cd "C:\Users\HOUSS\Downloads\HK_energies-main"
+.\HK_energies-main\scripts\start-dev.ps1
+```
+
+Build with the same automatic folder detection:
+
+```powershell
+cd "C:\Users\HOUSS\Downloads\HK_energies-main"
+.\HK_energies-main\scripts\build-project.ps1
+```
+
+If `npm run dev` shows an `ENOENT` error for `package.json`, you are probably in the parent folder. Move into the inner project folder or use the PowerShell launcher above.
+
 ## Backend EMS Simulation Engine
 
 The backend/data layer lives under `src/core` and is designed so OCP Benguerir is one example project rather than hardcoded global logic.
@@ -40,7 +66,7 @@ Accepted load column names:
 - `load_mwh`
 - `demand_mwh`
 
-If the load column is missing, the loader can generate a constant hourly industrial load from `constantLoadMW`. For OCP Benguerir, use `constantLoadMW: 25`.
+If the load column is missing, the loader can generate a constant hourly industrial load from `constantLoadMW`. For OCP Benguerir, use `constantLoadMW: 15`.
 
 ### OCP Benguerir Case
 
@@ -50,7 +76,7 @@ The OCP Benguerir example is represented in `src/data/examples/ocp_benguerir_pro
 - Site: Benguerir / Gantour
 - PV: 67 MWc
 - BESS: 25 MW / 125 MWh
-- Load: 25 MW continuous
+- Load: 15 MW continuous
 - Tariff: peak, full, and off-peak DH/kWh values
 - EMS: PV-to-load priority, PV surplus to BESS, peak discharge, off-peak grid charging only when allowed, and wheeling enabled
 
@@ -134,7 +160,7 @@ Accepted load columns:
 - `charge_mwh`
 - `load`
 
-If load is missing, the OCP runner generates a constant 25 MW load, equal to 25 MWh per hourly row.
+If load is missing, the OCP runner generates a constant 15 MW load, equal to 15 MWh per hourly row.
 
 Run the study:
 

@@ -1,4 +1,5 @@
 import type { EnergyProfilePoint, ProfileValidationResult } from "../models/profile.ts";
+import { OCP_LOAD_MW } from "../constants/ocpDefaults.ts";
 import { buildHourlyTimestamps } from "../utils/time.ts";
 import { validateHourlyProfile } from "./dataLoader.ts";
 
@@ -57,7 +58,7 @@ export function normalizeRawProfileRows(
   const normalizedRows = rows.map(normalizeRowKeys);
   const headers = Object.keys(normalizedRows[0] ?? {});
   const detectedColumns = detectProfileColumns(headers);
-  const constantLoadMW = options.constantLoadMW ?? 25;
+  const constantLoadMW = options.constantLoadMW ?? OCP_LOAD_MW;
   const simulationStepMinutes = options.simulationStepMinutes ?? 60;
   const stepHours = simulationStepMinutes / 60;
   const canGenerateTimestamps = !detectedColumns.timestampColumn && normalizedRows.length === 8760 && options.startDate;
@@ -102,7 +103,7 @@ export function normalizeRawProfileRows(
   };
 }
 
-export function buildOcpConstantLoadProfile(profile: EnergyProfilePoint[], constantLoadMW = 25): EnergyProfilePoint[] {
+export function buildOcpConstantLoadProfile(profile: EnergyProfilePoint[], constantLoadMW = OCP_LOAD_MW): EnergyProfilePoint[] {
   return profile.map((point) => ({
     ...point,
     loadMWh: constantLoadMW,
@@ -153,4 +154,3 @@ function findColumn(headers: string[], aliases: string[]): string | undefined {
 function sum(values: number[]): number {
   return values.reduce((total, value) => total + value, 0);
 }
-

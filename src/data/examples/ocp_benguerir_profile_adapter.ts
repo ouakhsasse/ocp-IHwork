@@ -1,4 +1,5 @@
 import { parseCsvProfile, type CsvProfileOptions, type ParsedProfiles } from "../../core/services/dataLoader.ts";
+import { OCP_LOAD_MW } from "../../core/constants/ocpDefaults.ts";
 
 export interface OcpBenguerirColumnMap {
   timestamp: string;
@@ -16,14 +17,14 @@ export const ocpBenguerirProfilePreparationNotes = [
   "Export the real OCP PV production database from Excel as CSV.",
   "Map the PV production column to production_mwh in MWh per hour.",
   "Map the industrial demand column to consumption_mwh when available.",
-  "If demand is missing, load the CSV with constantLoadMW: 25 to generate OCP's continuous 25 MWh hourly load.",
+  "If demand is missing, load the CSV with constantLoadMW: 15 to generate OCP's continuous 15 MWh hourly load.",
   "Keep exactly 8760 hourly rows for a normal year or 8784 rows for a leap year.",
 ];
 
 export function adaptOcpBenguerirRowsToCsv(
   rows: Record<string, string | number>[],
   columnMap: OcpBenguerirColumnMap,
-  constantLoadMW = 25,
+  constantLoadMW = OCP_LOAD_MW,
 ): string {
   const header = expectedOcpBenguerirCsvColumns.join(",");
   const csvRows = rows.map((row) => {
@@ -39,8 +40,7 @@ export function adaptOcpBenguerirRowsToCsv(
 export function loadOcpBenguerirAnnualCsv(csvText: string, options: CsvProfileOptions = {}): ParsedProfiles {
   return parseCsvProfile(csvText, {
     expectedLength: 8760,
-    constantLoadMW: 25,
+    constantLoadMW: OCP_LOAD_MW,
     ...options,
   });
 }
-

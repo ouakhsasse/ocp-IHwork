@@ -1,5 +1,6 @@
 import { runOcpStudyFromCsv } from "../core/services/realDataStudyRunner.ts";
 import { validateAndNormalizeOcpProfile } from "../core/services/profileNormalizationService.ts";
+import { OCP_LOAD_MW } from "../core/constants/ocpDefaults.ts";
 
 const sampleCsv = [
   "date,energie_pv",
@@ -30,17 +31,17 @@ const sampleCsv = [
 ].join("\n");
 
 const normalized = validateAndNormalizeOcpProfile(sampleCsv, {
-  constantLoadMW: 25,
+  constantLoadMW: OCP_LOAD_MW,
   allowShortProfileForTesting: true,
 });
 const study = runOcpStudyFromCsv(sampleCsv, {
-  constantLoadMW: 25,
+  constantLoadMW: OCP_LOAD_MW,
   allowShortProfileForTesting: true,
 });
 const parsedJson = JSON.parse(study.studySummaryJson) as { metadata?: unknown };
 
 assert(normalized.profile.length > 0, "Normalized rows must be greater than 0.");
-assert(normalized.profile.every((point) => point.loadMWh === 25), "Missing load column must generate 25 MWh load.");
+assert(normalized.profile.every((point) => point.loadMWh === OCP_LOAD_MW), "Missing load column must generate 15 MWh load.");
 assert(study.studyResult.recommendedScenario !== null, "Recommended scenario must exist.");
 assert(parsedJson.metadata !== undefined, "JSON export must be valid.");
 
@@ -58,4 +59,3 @@ function assert(condition: boolean, message: string): void {
     throw new Error(message);
   }
 }
-

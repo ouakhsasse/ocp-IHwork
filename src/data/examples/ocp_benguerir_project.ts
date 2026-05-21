@@ -6,6 +6,7 @@ import type { IndustrialEnergyProjectConfig } from "../../core/models/scenario.t
 import type { SiteEnergyDemand } from "../../core/models/site.ts";
 import { ocpBenguerirTariff } from "./ocp_benguerir_tariffs.ts";
 import { ocpBenguerirLoadProfileSample, ocpBenguerirPvProfileSample } from "./ocp_benguerir_profiles_sample.ts";
+import { DEFAULT_MIN_SOC_PERCENT, OCP_LOAD_MW } from "../../core/constants/ocpDefaults.ts";
 
 export const ocpBenguerirProject: IndustrialEnergyProject = {
   projectId: "ocp-benguerir-gantour",
@@ -14,7 +15,7 @@ export const ocpBenguerirProject: IndustrialEnergyProject = {
   country: "Morocco",
   siteName: "Benguerir / Gantour",
   sector: "Industrial mining and processing",
-  description: "Reusable first case study for a 67 MWc PV plant, 25 MW / 125 MWh BESS, and 25 MW continuous industrial load.",
+  description: "Reusable first case study for a 67 MWc PV plant, 25 MW / 125 MWh BESS, and 15 MW continuous industrial load.",
   createdAt: "2026-05-09T00:00:00.000Z",
   updatedAt: "2026-05-09T00:00:00.000Z",
   currency: "DH",
@@ -24,11 +25,11 @@ export const ocpBenguerirProject: IndustrialEnergyProject = {
 
 export const ocpBenguerirSiteDemand: SiteEnergyDemand = {
   loadProfile: ocpBenguerirLoadProfileSample,
-  constantLoadMW: 25,
-  annualConsumptionMWh: 25 * 8760,
-  peakLoadMW: 25,
+  constantLoadMW: OCP_LOAD_MW,
+  annualConsumptionMWh: OCP_LOAD_MW * 8760,
+  peakLoadMW: OCP_LOAD_MW,
   operatingHoursPerYear: 8760,
-  criticalLoadMW: 25,
+  criticalLoadMW: OCP_LOAD_MW,
   securityAutonomyMinutes: 30,
 };
 
@@ -43,7 +44,7 @@ export const ocpBenguerirPvSystem: PVSystem = {
 export const ocpBenguerirBattery: BatterySystem = {
   powerMW: 25,
   capacityMWh: 125,
-  minSocPercent: 10,
+  minSocPercent: DEFAULT_MIN_SOC_PERCENT,
   maxSocPercent: 100,
   initialSocPercent: 50,
   roundTripEfficiency: 0.9,
@@ -68,7 +69,7 @@ export const ocpBenguerirEmsStrategy: EMSStrategy = {
   enableAdaptiveSocFlag: false,
   enableRampRateControlFlag: true,
   enableOptimizationFlag: false,
-  socSecurityReservePercent: 10,
+  socSecurityReservePercent: DEFAULT_MIN_SOC_PERCENT,
   socTargetSummerPercent: 80,
   socTargetWinterPercent: 70,
   rampRateThresholdMWPerMin: 5,
@@ -83,4 +84,3 @@ export const ocpBenguerirProjectConfig: IndustrialEnergyProjectConfig = {
   tariff: ocpBenguerirTariff,
   emsStrategy: ocpBenguerirEmsStrategy,
 };
-

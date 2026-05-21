@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "check-root": "node scripts/check-project-root.js",
     "dev": "vite",
     "build": "tsc && vite build",
     "test:backend": "node --experimental-strip-types src/tests/backend_smoke_test.ts",

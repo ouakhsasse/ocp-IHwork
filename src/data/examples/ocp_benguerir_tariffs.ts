@@ -1,14 +1,14 @@
 import type { GridTariff } from "../../core/models/gridTariff.ts";
+import { FULL_TARIFF_DH_PER_KWH, OFF_PEAK_TARIFF_DH_PER_KWH, PEAK_TARIFF_DH_PER_KWH } from "../../core/constants/ocpDefaults.ts";
 
 export const ocpBenguerirTariff: GridTariff = {
   tariffName: "OCP Benguerir editable TOU tariff",
-  peakTariffDhPerKWh: 1.3645,
-  fullTariffDhPerKWh: 0.9736,
-  offPeakTariffDhPerKWh: 0.7131,
+  peakTariffDhPerKWh: PEAK_TARIFF_DH_PER_KWH,
+  fullTariffDhPerKWh: FULL_TARIFF_DH_PER_KWH,
+  offPeakTariffDhPerKWh: OFF_PEAK_TARIFF_DH_PER_KWH,
   peakHours: [{ startHour: 17, endHour: 23 }],
   fullHours: [{ startHour: 7, endHour: 17 }],
   offPeakHours: [{ startHour: 22, endHour: 7 }],
-  wheelingValueDhPerKWh: 0.7131,
+  wheelingValueDhPerKWh: OFF_PEAK_TARIFF_DH_PER_KWH,
   currency: "DH",
 };
-

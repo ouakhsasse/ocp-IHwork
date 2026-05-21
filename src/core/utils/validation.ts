@@ -19,7 +19,7 @@ export function validateBattery(battery: BatterySystem): ValidationResult {
   const errors: string[] = [];
   if (battery.capacityMWh <= 0) errors.push("Battery capacity must be greater than 0 MWh.");
   if (battery.powerMW <= 0) errors.push("Battery power must be greater than 0 MW.");
-  if (battery.minSocPercent >= battery.maxSocPercent) errors.push("Battery min SoC must be lower than max SoC.");
+  if (battery.minSocPercent > battery.maxSocPercent) errors.push("Battery min SoC must be lower than or equal to max SoC.");
   if (battery.initialSocPercent < battery.minSocPercent || battery.initialSocPercent > battery.maxSocPercent) {
     errors.push("Battery initial SoC must be between min and max SoC.");
   }
@@ -96,4 +96,3 @@ export function validateProjectConfig(config: IndustrialEnergyProjectConfig): Va
   ];
   return createValidationResult(errors);
 }
-

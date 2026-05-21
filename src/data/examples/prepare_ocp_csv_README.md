@@ -36,7 +36,7 @@ Load or demand can be named:
 - `load_mwh`
 - `demand_mwh`
 
-If consumption is missing, the backend can generate the OCP constant 25 MW industrial load. With hourly simulation steps, this becomes 25 MWh every hour.
+If consumption is missing, the backend can generate the OCP constant 15 MW industrial load. With hourly simulation steps, this becomes 15 MWh every hour.
 
 ## Timestamp Examples
 
@@ -47,4 +47,3 @@ Use ordered hourly timestamps:
 - `2025-01-01 00:00:00`
 
 Avoid duplicate timestamps and missing hours. The backend validates ordering, duplicates, numeric values, negative values, and annual profile length.
-

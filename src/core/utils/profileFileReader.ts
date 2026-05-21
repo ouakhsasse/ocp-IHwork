@@ -1,4 +1,5 @@
 import * as XLSX from "xlsx";
+import { OCP_LOAD_MW } from "../constants/ocpDefaults.ts";
 
 type ProfileRow = Record<string, unknown>;
 
@@ -82,7 +83,7 @@ export function rowsToNormalizedCsv(rows: ProfileRow[], options: ProfileFileRead
   }
 
   const defaultStartDate = options.defaultStartDate ?? "2025-01-01T00:00:00";
-  const defaultConstantLoadMWh = options.defaultConstantLoadMWh ?? 25;
+  const defaultConstantLoadMWh = options.defaultConstantLoadMWh ?? OCP_LOAD_MW;
   const generateConstantLoadIfMissing = options.generateConstantLoadIfMissing ?? true;
   const annualRowsUseGeneratedTimestamps = options.annualRowsUseGeneratedTimestamps ?? true;
   const headers = Object.keys(rows[0]).map(normalizeExcelHeader);
@@ -289,4 +290,3 @@ function parseRequiredNumber(value: unknown, label: string, rowIndex: number): n
 function formatCsvNumber(value: number): string {
   return String(Math.round(value * 1000000) / 1000000);
 }
-

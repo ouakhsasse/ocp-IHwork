@@ -3,8 +3,10 @@ import type { ScenarioComparisonRow, ScenarioStudyResult } from "./core/models/s
 import type { DispatchStepResult } from "./core/models/scenario.ts";
 import type { MonthlyEnergySummary } from "./core/models/profile.ts";
 import type { ChartConfiguration, ChartTypeRegistry } from "chart.js";
+import { DEFAULT_MIN_SOC_PERCENT, OCP_LOAD_MW } from "./core/constants/ocpDefaults.ts";
 import { runOcpStudyFromCsv } from "./core/services/realDataStudyRunner.ts";
 import { readUploadedProfileFile } from "./core/utils/profileFileReader.ts";
+import { clampPercent } from "./core/utils/units.ts";
 import Chart from "chart.js/auto";
 
 let lastStudyResult: OcpCsvStudyResult | null = null;
@@ -36,6 +38,9 @@ let scenarioTableBody: HTMLTableSectionElement;
 let emsInterpretation: HTMLElement;
 let downloadCsvButton: HTMLButtonElement;
 let downloadJsonButton: HTMLButtonElement;
+let minSocRangeInput: HTMLInputElement;
+let minSocValueLabel: HTMLElement;
+let minSocCardValue: HTMLElement;
 
 document.addEventListener("DOMContentLoaded", () => {
   initOcpEmsSimulatorPage();
@@ -52,6 +57,7 @@ function initOcpEmsSimulatorPage(): void {
   try {
     markFrontendLoaded();
     cacheRequiredElements();
+    bindMinSocInput();
     bindProfileFileInput();
     bindRunStudyButton();
     initDownloadButtons();
@@ -89,6 +95,26 @@ function cacheRequiredElements(): void {
   emsInterpretation = getElement<HTMLElement>("ems-interpretation");
   downloadCsvButton = getElement<HTMLButtonElement>("download-csv-button");
   downloadJsonButton = getElement<HTMLButtonElement>("download-json-button");
+  minSocRangeInput = getElement<HTMLInputElement>("minSocRange");
+  minSocValueLabel = getElement<HTMLElement>("minSocValueLabel");
+  minSocCardValue = getElement<HTMLElement>("minSocCardValue");
+}
+
+function bindMinSocInput(): void {
+  minSocRangeInput.value = String(getSelectedMinSocPercent());
+  updateMinSocDisplay();
+  minSocRangeInput.addEventListener("input", updateMinSocDisplay);
+}
+
+function getSelectedMinSocPercent(): number {
+  return clampPercent(Number(minSocRangeInput?.value ?? DEFAULT_MIN_SOC_PERCENT));
+}
+
+function updateMinSocDisplay(): void {
+  const minSocPercent = getSelectedMinSocPercent();
+  minSocRangeInput.value = String(minSocPercent);
+  minSocValueLabel.textContent = `Min SoC: ${formatNumber(minSocPercent, 0)}%`;
+  minSocCardValue.textContent = `${formatNumber(minSocPercent, 0)}%`;
 }
 
 function bindProfileFileInput(): void {
@@ -167,6 +193,8 @@ async function runStudy(): Promise<void> {
     validateProfileCsvForRun(finalCsvText, selectedProfileFile);
 
     const result = runOcpStudyFromCsv(finalCsvText, {
+      constantLoadMW: OCP_LOAD_MW,
+      minSocPercent: getSelectedMinSocPercent(),
       allowShortProfileForTesting: allowShortProfileInput.checked,
     });
 
@@ -193,7 +221,7 @@ async function getProfileCsvForRun(): Promise<{ csvText: string; source: InputSo
     renderFileStatus(`Selected file: ${uploadedFile.name}`, `Using uploaded file: ${uploadedFile.name}`);
     const parsedProfile = await readUploadedProfileFile(uploadedFile, {
       defaultStartDate: "2025-01-01T00:00:00",
-      defaultConstantLoadMWh: 25,
+      defaultConstantLoadMWh: OCP_LOAD_MW,
       generateConstantLoadIfMissing: true,
       annualRowsUseGeneratedTimestamps: true,
     });
@@ -209,7 +237,7 @@ async function getProfileCsvForRun(): Promise<{ csvText: string; source: InputSo
         parseStatusLines.push("Hourly timestamps generated from 2025-01-01T00:00:00.");
       }
       if (parsedProfile.generatedConstantLoad) {
-        parseStatusLines.push("Missing consumption column: constant 25 MWh hourly load generated.");
+        parseStatusLines.push(`Missing consumption column: constant ${OCP_LOAD_MW} MWh hourly load generated.`);
       }
 
       renderFileStatus(`Selected file: ${uploadedFile.name}`, parseStatusLines);
@@ -298,7 +326,7 @@ function renderResults(result: OcpCsvStudyResult): void {
     metricCard("Rows", formatNumber(summary.rowCount, 0), "Hourly records"),
     metricCard("Total PV Production", `${formatNumber(summary.totalPVProductionMWh, 2)} MWh`, "Normalized PV input"),
     metricCard("Total Load", `${formatNumber(summary.totalLoadMWh, 2)} MWh`, "Annual or sample demand"),
-    metricCard("Load Mode", summary.generatedConstantLoad ? "Generated" : "Detected", summary.generatedConstantLoad ? "25 MWh per hour" : "Loaded from CSV"),
+    metricCard("Load Mode", summary.generatedConstantLoad ? "Generated" : "Detected", summary.generatedConstantLoad ? `${OCP_LOAD_MW} MWh per hour` : "Loaded from CSV"),
     metricCard("Warnings", formatNumber(summary.warnings.length, 0), summary.warnings.length > 0 ? "Review alert below" : "No warnings"),
   ].join("");
 
@@ -402,7 +430,7 @@ function renderCharts(result: OcpCsvStudyResult): void {
       labels: socSamples.map((row, index) => index % 7 === 0 ? row.timestamp.slice(5, 10) : ""),
       datasets: [
         lineDataset("SoC %", socSamples.map((row) => row.socPercent), "#059669", 2),
-        lineDataset("Security reserve 10%", socSamples.map(() => 10), "#ef4444", 1, true),
+        lineDataset(`Security reserve ${formatNumber(getSelectedMinSocPercent(), 0)}%`, socSamples.map(() => getSelectedMinSocPercent()), "#ef4444", 1, true),
       ],
     },
     options: baseChartOptions("SoC (%)", false),
@@ -522,7 +550,7 @@ function renderInterpretation(result: OcpCsvStudyResult): void {
     `Grid purchase still supplies ${formatNumber(gridShare, 1)}% of annual load, which is useful for sizing future PV, BESS, or wheeling improvements.`,
   ];
   const badges = [
-    warningBadge(annual.minimumSocPercent < 10, "Min SoC below 10%", "SoC security reserve respected"),
+    warningBadge(annual.minimumSocPercent < getSelectedMinSocPercent(), `Min SoC below ${formatNumber(getSelectedMinSocPercent(), 0)}%`, "SoC security reserve respected"),
     warningBadge(annual.bessEquivalentCycles > 365, "Cycles above 365/year", "Cycles within 365/year"),
     warningBadge(curtailmentRate > 10, "Curtailment above 10%", "Curtailment acceptable"),
     warningBadge(annual.annualNetGainDh <= 0, "Net gain is not positive", "Positive annual net gain"),

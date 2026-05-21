@@ -1,5 +1,6 @@
 import type { EnergyProfilePoint } from "../../core/utils/time.ts";
 import { buildHourlyTimestamps } from "../../core/utils/time.ts";
+import { OCP_LOAD_MW } from "../../core/constants/ocpDefaults.ts";
 
 const timestamps = buildHourlyTimestamps("2026-01-01T00:00:00.000Z", 48);
 
@@ -17,6 +18,5 @@ export const ocpBenguerirPvProfileSample: EnergyProfilePoint[] = timestamps.map(
 
 export const ocpBenguerirLoadProfileSample: EnergyProfilePoint[] = timestamps.map((timestamp) => ({
   timestamp,
-  valueMWh: 25,
+  valueMWh: OCP_LOAD_MW,
 }));
-
