@@ -105,12 +105,17 @@
 
                 <div class="mb-6">
                     <h3 class="text-lg font-semibold mb-3 text-indigo-700">Grid Tariff Structure</h3>
-                    <div class="input-group"><label for="off_peak_grid_price">Off-Peak Grid Price</label><div class="input-container"><input type="number" id="off_peak_grid_price" value="0.7131" step="0.0001"><span class="unit">DH/kWh</span></div></div>
-                    <div class="input-group"><label for="full_grid_price">Full-Hour Grid Price</label><div class="input-container"><input type="number" id="full_grid_price" value="0.9736" step="0.0001"><span class="unit">DH/kWh</span></div></div>
-                    <div class="input-group"><label for="peak_grid_price">Peak Grid Price</label><div class="input-container"><input type="number" id="peak_grid_price" value="1.3645" step="0.0001"><span class="unit">DH/kWh</span></div></div>
-                    <div class="input-group"><label for="off_peak_share">Off-Peak Share</label><div class="input-container"><input type="number" id="off_peak_share" value="30" min="0" max="100" step="1"><span class="unit">%</span></div></div>
-                    <div class="input-group"><label for="full_share">Full-Hour Share</label><div class="input-container"><input type="number" id="full_share" value="50" min="0" max="100" step="1"><span class="unit">%</span></div></div>
-                    <div class="input-group"><label for="peak_share">Peak Share</label><div class="input-container"><input type="number" id="peak_share" value="20" min="0" max="100" step="1"><span class="unit">%</span></div></div>
+                    <div class="input-group"><label for="offPeakGridPrice">Off-Peak Grid Price</label><div class="input-container"><input type="number" id="offPeakGridPrice" value="0.7131" step="0.0001"><span class="unit">DH/kWh</span></div></div>
+                    <div class="input-group"><label for="fullHourGridPrice">Full-Hour Grid Price</label><div class="input-container"><input type="number" id="fullHourGridPrice" value="0.9736" step="0.0001"><span class="unit">DH/kWh</span></div></div>
+                    <div class="input-group"><label for="peakGridPrice">Peak Grid Price</label><div class="input-container"><input type="number" id="peakGridPrice" value="1.3645" step="0.0001"><span class="unit">DH/kWh</span></div></div>
+                </div>
+
+                <div class="mb-6">
+                    <h3 class="text-lg font-semibold mb-3 text-indigo-700">Tariff Time Shares</h3>
+                    <div class="input-group"><label for="offPeakShare">Off-Peak Share (%)</label><div class="input-container"><input type="number" id="offPeakShare" value="30" min="0" max="100" step="1"><span class="unit">%</span></div></div>
+                    <div class="input-group"><label for="fullHourShare">Full-Hour Share (%)</label><div class="input-container"><input type="number" id="fullHourShare" value="50" min="0" max="100" step="1"><span class="unit">%</span></div></div>
+                    <div class="input-group"><label for="peakShare">Peak Share (%)</label><div class="input-container"><input type="number" id="peakShare" value="20" min="0" max="100" step="1"><span class="unit">%</span></div></div>
+                    <p class="text-sm text-gray-500 mt-2">Total share must equal 100%.</p>
                     <p id="tariff_share_warning" class="hidden text-sm font-semibold text-danger mt-2"></p>
                 </div>
 
@@ -147,19 +152,19 @@
             <div id="results_container" class="lg:col-span-2 hidden">
                 <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 mb-8">
                     <div class="result-card text-center">
-                        <h3 class="text-lg font-semibold text-gray-600 mb-2">Annual Savings - Off-Peak Case</h3>
+                        <h3 class="text-lg font-semibold text-gray-600 mb-2">Annual Savings — Off-Peak Case</h3>
                         <p class="text-3xl font-bold text-indigo-600" id="off_peak_savings_result"></p>
                     </div>
                     <div class="result-card text-center">
-                        <h3 class="text-lg font-semibold text-gray-600 mb-2">Annual Savings - Full-Hour Case</h3>
+                        <h3 class="text-lg font-semibold text-gray-600 mb-2">Annual Savings — Full-Hour Case</h3>
                         <p class="text-3xl font-bold text-indigo-600" id="full_savings_result"></p>
                     </div>
                     <div class="result-card text-center">
-                        <h3 class="text-lg font-semibold text-gray-600 mb-2">Annual Savings - Peak Case</h3>
+                        <h3 class="text-lg font-semibold text-gray-600 mb-2">Annual Savings — Peak Case</h3>
                         <p class="text-3xl font-bold text-indigo-600" id="peak_savings_result"></p>
                     </div>
                     <div class="result-card text-center">
-                        <h3 class="text-lg font-semibold text-gray-600 mb-2">Annual Savings - Weighted Total</h3>
+                        <h3 class="text-lg font-semibold text-gray-600 mb-2">Annual Savings — Weighted Total</h3>
                         <p class="text-3xl font-bold text-indigo-600" id="weighted_savings_result"></p>
                     </div>
                 </div>
@@ -172,6 +177,7 @@
                 </div>
             </div>
         </div>
+        <p class="mt-6 text-center text-xs font-semibold text-gray-500">Version: Solar Profitability v1.1 — OCP tariff cases</p>
     </div>
 
     <script>
@@ -201,8 +207,10 @@
             return Math.min(Math.max(Number.isFinite(value) ? value : 0, 0), 100);
         }
 
-        function calculateWeightedTariff(offPeakPrice, fullPrice, peakPrice, offPeakSharePercent, fullSharePercent, peakSharePercent) {
-            return (offPeakPrice * offPeakSharePercent / 100) + (fullPrice * fullSharePercent / 100) + (peakPrice * peakSharePercent / 100);
+        function calculateWeightedTariff(offPeakPrice, fullHourPrice, peakPrice, offPeakShare, fullHourShare, peakShare) {
+            const shareTotal = offPeakShare + fullHourShare + peakShare;
+            if (shareTotal <= 0) return 0;
+            return (offPeakPrice * (offPeakShare / shareTotal)) + (fullHourPrice * (fullHourShare / shareTotal)) + (peakPrice * (peakShare / shareTotal));
         }
 
         function calculatePayback(investmentCost, annualSavings) {
@@ -250,20 +258,20 @@
             const feed_in_tariff = readNumberInput('feed_in_tariff');
             const annual_consumption = readNumberInput('annual_consumption');
             const tariffs = {
-                offPeak: readNumberInput('off_peak_grid_price', OFF_PEAK_TARIFF_DH_PER_KWH),
-                full: readNumberInput('full_grid_price', FULL_TARIFF_DH_PER_KWH),
-                peak: readNumberInput('peak_grid_price', PEAK_TARIFF_DH_PER_KWH),
+                offPeak: readNumberInput('offPeakGridPrice', OFF_PEAK_TARIFF_DH_PER_KWH),
+                full: readNumberInput('fullHourGridPrice', FULL_TARIFF_DH_PER_KWH),
+                peak: readNumberInput('peakGridPrice', PEAK_TARIFF_DH_PER_KWH),
             };
             const shares = {
-                offPeak: clampPercent(readNumberInput('off_peak_share')),
-                full: clampPercent(readNumberInput('full_share')),
-                peak: clampPercent(readNumberInput('peak_share')),
+                offPeak: clampPercent(readNumberInput('offPeakShare')),
+                full: clampPercent(readNumberInput('fullHourShare')),
+                peak: clampPercent(readNumberInput('peakShare')),
             };
             const share_total = shares.offPeak + shares.full + shares.peak;
             const shares_are_valid = Math.abs(share_total - 100) < 0.001;
 
             if (!shares_are_valid) {
-                tariffShareWarning.textContent = `Warning: tariff shares currently total ${formatNumber(share_total, 1)}%. Weighted Total is blocked until the total equals 100%.`;
+                tariffShareWarning.textContent = `The tariff shares must equal 100%. Current total is ${formatNumber(share_total, 1)}%; the weighted case is normalized automatically.`;
                 tariffShareWarning.classList.remove('hidden');
             } else {
                 tariffShareWarning.textContent = '';
@@ -284,7 +292,7 @@
                 offPeak: first_year_savings_cases.offPeak + first_year_revenue - annual_costs_reference,
                 full: first_year_savings_cases.full + first_year_revenue - annual_costs_reference,
                 peak: first_year_savings_cases.peak + first_year_revenue - annual_costs_reference,
-                weighted: shares_are_valid ? first_year_savings_cases.weighted + first_year_revenue - annual_costs_reference : 0,
+                weighted: first_year_savings_cases.weighted + first_year_revenue - annual_costs_reference,
             };
             const paybacks = {
                 offPeak: calculatePayback(C_capex_total, savings_for_payback.offPeak),
@@ -316,7 +324,7 @@
                 const energy_self_consumed = Math.min(energy_n_kwh * self_consumption_rate, annual_consumption);
                 const energy_exported = energy_n_kwh - energy_self_consumed;
                 
-                const savings_n = shares_are_valid ? energy_self_consumed * first_year_savings_cases.weightedGridPrice : 0;
+                const savings_n = energy_self_consumed * first_year_savings_cases.weightedGridPrice;
                 const revenue_n = energy_exported * feed_in_tariff;
                 const total_value_n = savings_n + revenue_n;
                 weighted_total_lifetime_value += total_value_n;
@@ -337,10 +345,10 @@
             const lcoe = total_lifetime_costs_discounted / (total_lifetime_energy_kwh / 1000); // in DH/MWh
 
             // --- 3. Update UI ---
-            document.getElementById('off_peak_savings_result').textContent = formatCurrency(first_year_savings_cases.offPeak, ' DH/an');
-            document.getElementById('full_savings_result').textContent = formatCurrency(first_year_savings_cases.full, ' DH/an');
-            document.getElementById('peak_savings_result').textContent = formatCurrency(first_year_savings_cases.peak, ' DH/an');
-            document.getElementById('weighted_savings_result').textContent = shares_are_valid ? formatCurrency(first_year_savings_cases.weighted, ' DH/an') : 'Blocked';
+            document.getElementById('off_peak_savings_result').textContent = formatCurrency(first_year_savings_cases.offPeak, ' DH/year');
+            document.getElementById('full_savings_result').textContent = formatCurrency(first_year_savings_cases.full, ' DH/year');
+            document.getElementById('peak_savings_result').textContent = formatCurrency(first_year_savings_cases.peak, ' DH/year');
+            document.getElementById('weighted_savings_result').textContent = formatCurrency(first_year_savings_cases.weighted, ' DH/year');
 
 
             // Generate HTML for details
@@ -354,19 +362,19 @@
                     <h3 class="calc-title">2. Annual Savings by Tariff Case</h3>
                     <p class="calc-formula">
                     Self-consumed solar energy = <span class="calc-value">${formatNumber(first_year_self_consumed_kwh, 0)} kWh/an</span><br>
-                    Off-Peak Case Savings = ${formatNumber(first_year_self_consumed_kwh, 0)} kWh * ${formatCurrency(tariffs.offPeak, ' DH/kWh')} = <span class="calc-value">${formatCurrency(first_year_savings_cases.offPeak, ' DH/an')}</span><br>
-                    Full-Hour Case Savings = ${formatNumber(first_year_self_consumed_kwh, 0)} kWh * ${formatCurrency(tariffs.full, ' DH/kWh')} = <span class="calc-value">${formatCurrency(first_year_savings_cases.full, ' DH/an')}</span><br>
-                    Peak Case Savings = ${formatNumber(first_year_self_consumed_kwh, 0)} kWh * ${formatCurrency(tariffs.peak, ' DH/kWh')} = <span class="calc-value">${formatCurrency(first_year_savings_cases.peak, ' DH/an')}</span><br><br>
-                    Weighted grid price = ${shares_are_valid ? `<span class="calc-value">${formatCurrency(first_year_savings_cases.weightedGridPrice, ' DH/kWh')}</span>` : '<span class="text-danger font-bold">blocked because shares do not total 100%</span>'}<br>
-                    Weighted Total Case Savings = <span class="calc-value">${shares_are_valid ? formatCurrency(first_year_savings_cases.weighted, ' DH/an') : 'Blocked'}</span>
+                    Off-Peak Case Savings = ${formatNumber(first_year_self_consumed_kwh, 0)} kWh * ${formatCurrency(tariffs.offPeak, ' DH/kWh')} = <span class="calc-value">${formatCurrency(first_year_savings_cases.offPeak, ' DH/year')}</span><br>
+                    Full-Hour Case Savings = ${formatNumber(first_year_self_consumed_kwh, 0)} kWh * ${formatCurrency(tariffs.full, ' DH/kWh')} = <span class="calc-value">${formatCurrency(first_year_savings_cases.full, ' DH/year')}</span><br>
+                    Peak Case Savings = ${formatNumber(first_year_self_consumed_kwh, 0)} kWh * ${formatCurrency(tariffs.peak, ' DH/kWh')} = <span class="calc-value">${formatCurrency(first_year_savings_cases.peak, ' DH/year')}</span><br><br>
+                    Weighted grid price = <span class="calc-value">${formatCurrency(first_year_savings_cases.weightedGridPrice, ' DH/kWh')}</span><br>
+                    Weighted Total Case Savings = <span class="calc-value">${formatCurrency(first_year_savings_cases.weighted, ' DH/year')}</span>
                     </p>
                 </div>
                 <div class="calc-step">
                     <h3 class="calc-title">3. Export Revenue and Lifetime Value</h3>
                     <p class="calc-formula">
-                    Revenue (Export) = ${formatNumber(first_year_exported_kwh, 0)} kWh * ${formatCurrency(feed_in_tariff, ' DH/kWh')} = <span class="calc-value">${formatCurrency(first_year_revenue, ' DH/an')}</span><br>
+                    Revenue (Export) = ${formatNumber(first_year_exported_kwh, 0)} kWh * ${formatCurrency(feed_in_tariff, ' DH/kWh')} = <span class="calc-value">${formatCurrency(first_year_revenue, ' DH/year')}</span><br>
                     <span class="font-bold block mt-2">Total Discounted Cost (LCC) =</span> <span class="calc-value">${formatCurrency(total_lifetime_costs_discounted, ' DH')}</span><br>
-                    <span class="font-bold block mt-2">Weighted Total Value Generated (undiscounted) =</span> <span class="calc-value">${shares_are_valid ? formatCurrency(weighted_total_lifetime_value, ' DH') : 'Blocked'}</span>
+                    <span class="font-bold block mt-2">Weighted Total Value Generated (undiscounted) =</span> <span class="calc-value">${formatCurrency(weighted_total_lifetime_value, ' DH')}</span>
                     </p>
                 </div>
                 <div class="calc-step">
@@ -379,12 +387,16 @@
                     <h3 class="calc-title">5. Payback Period and ROI by Case</h3>
                     <p class="calc-formula">
                     Annual net cash flow includes savings + export revenue - annual O&M.<br><br>
-                    Off-Peak Case: Payback = <span class="calc-value">${Number.isFinite(paybacks.offPeak) ? formatNumber(paybacks.offPeak, 1) + ' years' : 'N/A'}</span>, ROI = <span class="calc-value">${formatNumber(roi.offPeak, 2)}%</span><br>
-                    Full-Hour Case: Payback = <span class="calc-value">${Number.isFinite(paybacks.full) ? formatNumber(paybacks.full, 1) + ' years' : 'N/A'}</span>, ROI = <span class="calc-value">${formatNumber(roi.full, 2)}%</span><br>
-                    Peak Case: Payback = <span class="calc-value">${Number.isFinite(paybacks.peak) ? formatNumber(paybacks.peak, 1) + ' years' : 'N/A'}</span>, ROI = <span class="calc-value">${formatNumber(roi.peak, 2)}%</span><br>
-                    Weighted Total: Payback = <span class="calc-value">${shares_are_valid && Number.isFinite(paybacks.weighted) ? formatNumber(paybacks.weighted, 1) + ' years' : 'Blocked'}</span>, ROI = <span class="calc-value">${shares_are_valid ? formatNumber(roi.weighted, 2) + '%' : 'Blocked'}</span><br><br>
-                    <span class="font-bold block">Weighted Total NPV =</span> <span class="calc-value">${shares_are_valid ? formatCurrency(weighted_discounted_npv, ' DH') : 'Blocked'}</span><br>
-                    <span class="font-bold block mt-2">Weighted Total Project Profit =</span> <span class="calc-value">${shares_are_valid ? formatCurrency(weighted_cumulative_cash_flow, ' DH') : 'Blocked'}</span>
+                    Payback — Off-Peak Case = <span class="calc-value">${Number.isFinite(paybacks.offPeak) ? formatNumber(paybacks.offPeak, 1) + ' years' : 'N/A'}</span><br>
+                    Payback — Full-Hour Case = <span class="calc-value">${Number.isFinite(paybacks.full) ? formatNumber(paybacks.full, 1) + ' years' : 'N/A'}</span><br>
+                    Payback — Peak Case = <span class="calc-value">${Number.isFinite(paybacks.peak) ? formatNumber(paybacks.peak, 1) + ' years' : 'N/A'}</span><br>
+                    Payback — Weighted Total = <span class="calc-value">${Number.isFinite(paybacks.weighted) ? formatNumber(paybacks.weighted, 1) + ' years' : 'N/A'}</span><br><br>
+                    ROI — Off-Peak Case = <span class="calc-value">${formatNumber(roi.offPeak, 2)}%</span><br>
+                    ROI — Full-Hour Case = <span class="calc-value">${formatNumber(roi.full, 2)}%</span><br>
+                    ROI — Peak Case = <span class="calc-value">${formatNumber(roi.peak, 2)}%</span><br>
+                    ROI — Weighted Total = <span class="calc-value">${formatNumber(roi.weighted, 2)}%</span><br><br>
+                    <span class="font-bold block">Weighted Total NPV =</span> <span class="calc-value">${formatCurrency(weighted_discounted_npv, ' DH')}</span><br>
+                    <span class="font-bold block mt-2">Weighted Total Project Profit =</span> <span class="calc-value">${formatCurrency(weighted_cumulative_cash_flow, ' DH')}</span>
                     </p>
                 </div>
             `;
