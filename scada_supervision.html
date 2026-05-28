@@ -631,21 +631,21 @@
             <div class="control-row">
                 <a href="index.html" class="scada-button">Dashboard</a>
                 <a href="OCP EMS Simulator.html" class="scada-button">EMS Study</a>
-                <button id="startButton" class="scada-button primary">Start simulation</button>
+                <button id="startButton" class="scada-button primary">Start hourly simulation</button>
                 <button id="pauseButton" class="scada-button">Pause</button>
-                <button id="nextMinuteButton" class="scada-button">Next minute</button>
+                <button id="previousHourButton" class="scada-button">Previous hour</button>
                 <button id="nextHourButton" class="scada-button">Next hour</button>
-                <button id="resetButton" class="scada-button">Reset day</button>
+                <button id="resetButton" class="scada-button">Reset empty</button>
                 <select id="speedSelect" class="scada-button" aria-label="Simulation speed">
-                    <option value="1">1x</option>
-                    <option value="60">60x</option>
-                    <option value="3600">3600x</option>
+                    <option value="1">1x hour/s</option>
+                    <option value="5">5x hours/s</option>
+                    <option value="24">24x day/s</option>
                     <option value="instant">Instant day</option>
                     <option value="instant-full">Instant full year</option>
                 </select>
-                <button id="exportCsvButton" class="scada-button">Export CSV</button>
+                <button id="exportCsvButton" class="scada-button">Export Hourly CSV</button>
                 <button id="exportJsonButton" class="scada-button">Export JSON</button>
-                <button id="exportHourlyButton" class="scada-button">Export Hourly</button>
+                <button id="exportHourlyButton" class="scada-button">Export Daily Summary</button>
             </div>
         </header>
 
@@ -697,20 +697,20 @@
                     <div id="labelBessLoad" class="flow-label" style="left:47%;top:52%;color:#818cf8;">0.00 MW</div>
                     <div id="labelGridLoad" class="flow-label" style="right:8%;top:52%;color:#ef4444;">0.00 MW</div>
                     <div id="labelGridBess" class="flow-label" style="left:58%;top:78%;color:#ef4444;">0.00 MW</div>
-                    <div class="note">SCADA minute mode: each Excel hourly value is expanded into 60 simulated minutes. The dashboard updates every minute, while EMS decisions follow the current tariff and EMS mode.</div>
+                    <div class="note">Hourly SCADA mode: each Excel row represents one simulated hour. The dashboard, logs, charts, SoC and economics update hour by hour until the 8760-hour file is completed.</div>
                 </div>
                 <div class="panel">
-                    <div class="panel-title"><span>SECTION 3 - CURRENT MINUTE SUPERVISION</span><span id="chartCursorLabel">Current minute: --</span></div>
-                    <div id="currentMinuteSummary" class="summary-grid"></div>
+                    <div class="panel-title"><span>SECTION 3 - CURRENT HOUR SUPERVISION</span><span id="chartCursorLabel">Current hour: --</span></div>
+                    <div id="currentHourSummary" class="summary-grid"></div>
                 </div>
                 <div class="panel">
-                    <div class="panel-title"><span>CURRENT MINUTE STATE</span><span>ENERGY THIS MINUTE</span></div>
+                    <div class="panel-title"><span>CURRENT HOUR STATE</span><span>ENERGY THIS HOUR</span></div>
                     <div class="minute-supervision-grid">
                         <div id="liveMinuteState" class="command-box minute-grid">
-                            <span>Current minute</span><span>--</span>
+                            <span>Current hour</span><span>--</span>
                             <span>Excel row</span><span>--</span>
-                            <span>Minute inside hour</span><span>--</span>
-                            <span>Global minute</span><span>--</span>
+                            <span>Hour of day</span><span>--</span>
+                            <span>Hour index</span><span>--</span>
                             <span>Day</span><span>--</span>
                             <span>Progress</span><span>--</span>
                             <span>Tariff</span><span>--</span>
@@ -729,11 +729,11 @@
                 </div>
                 <div class="panel">
                     <div class="panel-title">
-                        <span>SECTION 4 - MINUTE-BY-MINUTE SCADA LOG</span>
+                        <span>SECTION 4 - HOUR-BY-HOUR SCADA LOG</span>
                         <span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
                             <label class="toggle-row" style="font-size:10px;"><input id="autoScrollLog" type="checkbox" checked> Auto-scroll log</label>
                             <button id="clearVisibleLogButton" class="scada-button" type="button">Clear visible log</button>
-                            <button id="exportMinuteLogButton" class="scada-button" type="button">Export minute log CSV</button>
+                            <button id="exportHourLogButton" class="scada-button" type="button">Export hourly log CSV</button>
                             <button id="compactLogButton" class="scada-button" type="button">Compact columns</button>
                             <button class="scada-button log-filter active" type="button" data-filter="all">All</button>
                             <button class="scada-button log-filter" type="button" data-filter="A">Mode A</button>
@@ -747,7 +747,7 @@
                         <table>
                             <thead>
                                 <tr>
-                                    <th>Time</th><th>Minute #</th><th>Excel row</th><th>PV MW</th><th>Load MW</th><th>BESS MW</th><th>SoC %</th><th>Grid MW</th><th>Wheeling MW</th><th>Tariff</th><th>EMS Mode</th><th>Command</th><th>Cost DH/min</th><th>Gain DH/min</th><th>Balance</th>
+                                    <th>Time</th><th>Excel row</th><th>PV MWh</th><th>Load MWh</th><th>PV to Load</th><th>PV to BESS</th><th>BESS to Load</th><th>Grid to Load</th><th>Grid to BESS</th><th>Wheeling</th><th>BESS Power MW</th><th>SoC Start %</th><th>SoC End %</th><th>Tariff</th><th>EMS Mode</th><th>Command</th><th>Cost DH</th><th>Gain DH</th><th>Cumulative Gain DH</th><th>Balance</th>
                                 </tr>
                             </thead>
                             <tbody id="minuteLogBody"></tbody>
@@ -761,9 +761,8 @@
                             <div class="chart-toolbar">
                                 <span class="badge online">Chart window</span>
                                 <button class="scada-button chart-window active" data-window="day" type="button">Current day</button>
-                                <button class="scada-button chart-window" data-window="1h" type="button">Last 1 hour</button>
-                                <button class="scada-button chart-window" data-window="6h" type="button">Last 6 hours</button>
-                                <button class="scada-button chart-window" data-window="full-day" type="button">Full day</button>
+                                <button class="scada-button chart-window" data-window="24h" type="button">Last 24 hours</button>
+                                <button class="scada-button chart-window" data-window="7d" type="button">Last 7 days</button>
                                 <button class="scada-button chart-window" data-window="year" type="button">Full year summary</button>
                             </div>
                             <div class="interpretation-panel">
@@ -777,7 +776,7 @@
                         <div class="chart-panel"><div class="chart-title">Chart 4 - Grid Import Breakdown <span id="gridBreakdownLatest" class="latest-value"></span></div><div class="chart-box"><canvas id="gridBreakdownChart"></canvas></div></div>
                         <div class="chart-panel"><div class="chart-title">Chart 5 - BESS SoC <span id="socLatest" class="latest-value"></span></div><div class="chart-box"><canvas id="socChart"></canvas></div></div>
                         <div class="chart-panel"><div class="chart-title">Chart 6 - Economic Performance <span id="economicLatest" class="latest-value"></span></div><div class="chart-box"><canvas id="economicChart"></canvas></div></div>
-                        <div class="chart-panel" style="grid-column:1/-1;"><div class="chart-title">Chart 7 - Hourly / Minute Cost and Avoided Cost <span id="minuteCostLatest" class="latest-value"></span></div><div class="chart-box"><canvas id="minuteCostChart"></canvas></div></div>
+                        <div class="chart-panel" style="grid-column:1/-1;"><div class="chart-title">Chart 7 - Hourly Cost and Avoided Cost <span id="hourCostLatest" class="latest-value"></span></div><div class="chart-box"><canvas id="hourCostChart"></canvas></div></div>
                         <div class="chart-panel" style="grid-column:1/-1;">
                             <div class="chart-title">Tariff Period Timeline</div>
                             <div class="tariff-timeline">
@@ -794,7 +793,7 @@
                     </section>
                 </div>
                 <div class="panel">
-                    <div class="panel-title"><span>SECTION 6 - FULL EXCEL TEST PROGRESS</span><span>8760 HOURS / 525600 MINUTES</span></div>
+                    <div class="panel-title"><span>SECTION 6 - FULL EXCEL TEST PROGRESS</span><span>8760 HOURS</span></div>
                     <div style="padding:8px;display:grid;gap:8px;">
                         <div id="excelProgress" class="command-box" style="color:#c7d6e6;font-size:12px;">Waiting for 8760-hour workbook</div>
                     </div>

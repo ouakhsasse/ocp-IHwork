@@ -3,26 +3,25 @@ import type { ChartConfiguration, Plugin } from "chart.js";
 import type { PvgisProfileResult } from "./core/services/pvgisService.ts";
 import type { ScadaMinuteState } from "./core/services/scadaSimulationService.ts";
 import type { WeatherForecastResult } from "./core/services/weatherService.ts";
-import type { ExcelMinuteScadaState, ExcelScadaSimulationResult } from "./core/services/excelScadaSimulationService.ts";
+import type { ExcelHourScadaState, ExcelScadaSimulationResult } from "./core/services/excelScadaSimulationService.ts";
 import { fetchPvgisHourlyPvProfile } from "./core/services/pvgisService.ts";
 import { simulateScadaDay } from "./core/services/scadaSimulationService.ts";
 import { fetchBenguerirWeatherForecast } from "./core/services/weatherService.ts";
 import {
   EXCEL_SCADA_EXPECTED_HOURS,
-  EXCEL_SCADA_EXPECTED_MINUTES,
-  exportExcelHourlySummaryCsv,
-  exportExcelMinuteLogCsv,
+  EXCEL_SCADA_EXPECTED_STEPS,
+  exportExcelHourlyLogCsv,
   exportExcelSummaryJson,
   getChartCursorHourPosition,
-  getExcelMinutePointer,
+  getExcelHourPointer,
   parseExcelScadaWorkbook,
   simulateExcelScadaFullYear,
 } from "./core/services/excelScadaSimulationService.ts";
 
-type DisplayMinuteState = ScadaMinuteState | ExcelMinuteScadaState;
+type DisplayHourState = ScadaMinuteState | ExcelHourScadaState;
 
-let minuteStates: DisplayMinuteState[] = simulateScadaDay();
-let currentMinute = 0;
+let hourStates: DisplayHourState[] = simulateScadaDay();
+let currentHour = 0;
 let timerId: number | null = null;
 let activeCharts: ScadaLineChart[] = [];
 let latestPvgis: PvgisProfileResult | null = null;
@@ -30,24 +29,24 @@ let latestWeather: WeatherForecastResult | null = null;
 let latestExcelResult: ExcelScadaSimulationResult | null = null;
 let excelModeActive = false;
 let chartWindowStart = 0;
-let lastLoggedMinute: number | null = null;
-interface MinuteLogEntry {
+let lastLoggedHour: number | null = null;
+interface HourLogEntry {
   html: string;
   mode: string;
   hasAlarm: boolean;
   hasBalanceError: boolean;
   isEvent: boolean;
 }
-const visibleMinuteLogRows: MinuteLogEntry[] = [];
+const visibleHourLogRows: HourLogEntry[] = [];
 let activeLogFilter = "all";
-let chartWindowMode: "day" | "1h" | "6h" | "full-day" | "year" = "day";
+let chartWindowMode: "day" | "24h" | "7d" | "year" = "day";
 
 const simulationDate = "2026-06-21";
 type ScadaLineChart = Chart<"line", Array<number | null>, string>;
 interface ChartView {
-  states: DisplayMinuteState[];
+  states: DisplayHourState[];
   labels: string[];
-  windowStartMinute: number;
+  windowStartHour: number;
 }
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -62,7 +61,7 @@ document.addEventListener("DOMContentLoaded", () => {
 async function initScadaSupervision(): Promise<void> {
   bindControls();
   renderCharts();
-  renderMinute(0);
+  renderHour(0);
 
   const [pvgis, weather] = await Promise.all([
     fetchPvgisHourlyPvProfile(),
@@ -70,7 +69,7 @@ async function initScadaSupervision(): Promise<void> {
   ]);
   latestPvgis = pvgis;
   latestWeather = weather;
-  minuteStates = simulateScadaDay(pvgis.hourlyProfile, {
+  hourStates = simulateScadaDay(pvgis.hourlyProfile, {
     allowGridToBess: weather.allowGridToBessTonight,
     nextDayIrradiationMjM2: weather.tomorrow.shortwaveRadiationSumMjM2,
     nextDayCloudCoverPercent: weather.tomorrow.cloudCoverMeanPercent,
@@ -80,7 +79,7 @@ async function initScadaSupervision(): Promise<void> {
   setBadge("weatherStatus", weather.source === "open-meteo" ? "Open-Meteo ONLINE" : "Open-Meteo FALLBACK MODE", weather.source === "open-meteo" ? "online" : "warning");
   updateWeatherSummary(weather);
   renderCharts();
-  renderMinute(currentMinute);
+  renderHour(currentHour);
 }
 
 function bindControls(): void {
@@ -88,18 +87,18 @@ function bindControls(): void {
   getButton("pauseButton").addEventListener("click", () => {
     pauseSimulation();
   });
-  getButton("nextMinuteButton").addEventListener("click", () => {
+  getButton("previousHourButton").addEventListener("click", () => {
     pauseSimulation();
-    stepSimulation(1);
+    stepSimulation(-1);
   });
   getButton("nextHourButton").addEventListener("click", () => {
     pauseSimulation();
-    stepSimulation(60);
+    stepSimulation(1);
   });
   getButton("resetButton").addEventListener("click", () => {
     pauseSimulation();
-    currentMinute = 0;
-    renderMinute(currentMinute);
+    currentHour = 0;
+    renderHour(currentHour);
     setBadge("emsStatusBadge", "EMS READY", "ready");
   });
   getButton("exportCsvButton").addEventListener("click", exportCsv);
@@ -117,18 +116,18 @@ function bindControls(): void {
   getButton("startExcelButton").addEventListener("click", startExcelMode);
   getButton("nextDayButton").addEventListener("click", () => {
     pauseSimulation();
-    stepSimulation(1440);
+    stepSimulation(24);
   });
   getButton("runCurrentDayButton").addEventListener("click", runCurrentDay);
   getButton("runFullExcelButton").addEventListener("click", runFullExcel);
   getButton("resetExcelButton").addEventListener("click", resetExcelMode);
   getButton("toggleChartsButton").addEventListener("click", toggleCharts);
   getButton("clearVisibleLogButton").addEventListener("click", () => {
-    visibleMinuteLogRows.length = 0;
-    lastLoggedMinute = null;
-    renderMinuteLog();
+    visibleHourLogRows.length = 0;
+    lastLoggedHour = null;
+    renderHourLog();
   });
-  getButton("exportMinuteLogButton").addEventListener("click", exportCsv);
+  getButton("exportHourLogButton").addEventListener("click", exportCsv);
   getButton("compactLogButton").addEventListener("click", () => {
     const log = document.querySelector(".minute-log");
     log?.classList.toggle("compact-log");
@@ -145,7 +144,7 @@ function bindControls(): void {
     button.addEventListener("click", () => {
       activeLogFilter = button.dataset.filter ?? "all";
       document.querySelectorAll<HTMLButtonElement>(".log-filter").forEach((item) => item.classList.toggle("active", item === button));
-      renderMinuteLog();
+      renderHourLog();
     });
   });
   document.querySelectorAll<HTMLElement>("#alarmList, #activeAlarmList").forEach((alarmContainer) => alarmContainer.addEventListener("click", (event) => {
@@ -163,8 +162,8 @@ function startSimulation(): void {
 
   if (speed === "instant-full") {
     pauseSimulation(false);
-    currentMinute = getLastMinuteIndex();
-    renderMinute(currentMinute);
+    currentHour = getLastHourIndex();
+    renderHour(currentHour);
     setBadge("emsStatusBadge", "EMS READY", "ready");
     return;
   }
@@ -177,9 +176,9 @@ function startSimulation(): void {
   }
 
   pauseSimulation(false);
-  const minutesPerTick = Number(speed);
+  const hoursPerTick = Number(speed);
   timerId = window.setInterval(() => {
-    stepSimulation(minutesPerTick);
+    stepSimulation(hoursPerTick);
   }, 1000);
 }
 
@@ -193,19 +192,19 @@ function pauseSimulation(updateBadge = true): void {
   }
 }
 
-function stepSimulation(minutes: number): void {
-  const previousMinute = currentMinute;
-  currentMinute = Math.min(getLastMinuteIndex(), currentMinute + minutes);
-  renderMinute(currentMinute);
-  appendTransitionMessages(previousMinute, currentMinute);
-  if (currentMinute >= getLastMinuteIndex()) {
+function stepSimulation(hours: number): void {
+  const previousHour = currentHour;
+  currentHour = Math.max(0, Math.min(getLastHourIndex(), currentHour + hours));
+  renderHour(currentHour);
+  appendTransitionMessages(previousHour, currentHour);
+  if (currentHour >= getLastHourIndex()) {
     pauseSimulation();
-    if (excelModeActive) setBadge("emsStatusBadge", "FULL EXCEL SCADA TEST COMPLETED", "ready");
+    if (excelModeActive) setBadge("emsStatusBadge", "FULL EXCEL HOURLY SCADA TEST COMPLETED", "ready");
   }
 }
 
-function renderMinute(minute: number): void {
-  const state = minuteStates[minute];
+function renderHour(hour: number): void {
+  const state = hourStates[hour];
   if (!state) return;
   setText("simDateTime", isExcelState(state) ? state.timestamp.replace("T", " ") : `${simulationDate} ${state.timeLabel}`);
   setText("plantModeTag", `MODE ${state.emsMode}${state.supportMode ? " + D" : ""}`);
@@ -231,7 +230,7 @@ function renderMinute(minute: number): void {
   setText("labelBessLoad", `${formatNumber(state.bessToLoadMW, 2)} MW`);
   setText("labelGridLoad", `${formatNumber(state.gridToLoadMW, 2)} MW`);
   setText("labelGridBess", `${formatNumber(state.gridToBessMW, 2)} MW`);
-  getElement<HTMLElement>("timelineCursor").style.setProperty("--cursor", `${((minute % 1440) / 1439) * 100}%`);
+  getElement<HTMLElement>("timelineCursor").style.setProperty("--cursor", `${((hour % 24) / 23) * 100}%`);
 
   updateFlow("flowPvInv", state.pvMW);
   updateFlow("flowInvLoad", state.pvToLoadMW);
@@ -243,12 +242,15 @@ function renderMinute(minute: number): void {
   updatePeriodOverlay(state);
   renderAlarms(state);
   renderExcelProgress(state);
-  renderLiveMinuteState(state);
-  renderEnergyThisMinute(state);
+  renderLiveHourState(state);
+  renderEnergyThisHour(state);
   renderEnergyInterpretation(state);
-  renderCurrentMinuteSummary(state);
-  appendMinuteLogRow(state);
-  setText("chartCursorLabel", `Current minute: ${state.timeLabel} | x=${formatNumber(getChartCursorHourPosition(state.minute), 2)}h`);
+  renderCurrentHourSummary(state);
+  appendHourLogRow(state);
+  if (excelModeActive && isExcelState(state)) {
+    console.log("Hourly state:", state);
+  }
+  setText("chartCursorLabel", `Current hour: ${state.timeLabel} | x=${formatNumber(getChartCursorHourPosition(state.minute), 0)}h`);
   updateChartsLive();
 }
 
@@ -269,7 +271,7 @@ function updatePeriodOverlay(state: ScadaMinuteState): void {
   }
 }
 
-function renderAlarms(state: DisplayMinuteState): void {
+function renderAlarms(state: DisplayHourState): void {
   const alarms = [
     { name: "Low SoC", severity: "WARNING", active: state.socPercent <= 18 },
     { name: "High SoC", severity: "INFO", active: state.socPercent >= 92 },
@@ -305,7 +307,7 @@ function renderCharts(): void {
   activeCharts.forEach((chart) => chart.destroy());
   activeCharts = [];
   const view = getChartView();
-  chartWindowStart = view.windowStartMinute;
+  chartWindowStart = view.windowStartHour;
 
   createChart("loadSupplyChart", {
     type: "line",
@@ -318,7 +320,7 @@ function renderCharts(): void {
       ],
     },
     options: chartOptions("MW", true),
-    plugins: [minuteCursorPlugin, transitionMarkerPlugin],
+    plugins: [hourCursorPlugin, transitionMarkerPlugin],
   });
 
   createChart("bessChargeChart", {
@@ -331,7 +333,7 @@ function renderCharts(): void {
       ],
     },
     options: chartOptions("MW"),
-    plugins: [minuteCursorPlugin, zeroLinePlugin, transitionMarkerPlugin],
+    plugins: [hourCursorPlugin, zeroLinePlugin, transitionMarkerPlugin],
   });
 
   createChart("pvAllocationChart", {
@@ -346,7 +348,7 @@ function renderCharts(): void {
       ],
     },
     options: chartOptions("MW", true),
-    plugins: [minuteCursorPlugin, transitionMarkerPlugin],
+    plugins: [hourCursorPlugin, transitionMarkerPlugin],
   });
 
   createChart("gridBreakdownChart", {
@@ -360,7 +362,7 @@ function renderCharts(): void {
       ],
     },
     options: chartOptions("MW"),
-    plugins: [minuteCursorPlugin, transitionMarkerPlugin],
+    plugins: [hourCursorPlugin, transitionMarkerPlugin],
   });
 
   createChart("socChart", {
@@ -372,7 +374,7 @@ function renderCharts(): void {
       ],
     },
     options: chartOptions("%"),
-    plugins: [minuteCursorPlugin, transitionMarkerPlugin],
+    plugins: [hourCursorPlugin, transitionMarkerPlugin],
   });
 
   createChart("economicChart", {
@@ -386,21 +388,21 @@ function renderCharts(): void {
       ],
     },
     options: chartOptions("DH"),
-    plugins: [minuteCursorPlugin, transitionMarkerPlugin],
+    plugins: [hourCursorPlugin, transitionMarkerPlugin],
   });
 
-  createChart("minuteCostChart", {
+  createChart("hourCostChart", {
     type: "line",
     data: {
       labels: view.labels,
       datasets: [
-        lineDataset("Baseline cost DH/min", chartValues(view, baselineCostDhMin), "#94a3b8"),
-        lineDataset("EMS cost DH/min", chartValues(view, emsCostDhMin), "#f59e0b"),
-        areaDataset("Avoided cost / gain DH/min", chartValues(view, gainDhMin), "#22c55e"),
+        lineDataset("Baseline cost DH/h", chartValues(view, baselineCostDhHour), "#94a3b8"),
+        lineDataset("EMS cost DH/h", chartValues(view, emsCostDhHour), "#f59e0b"),
+        areaDataset("Avoided cost / gain DH/h", chartValues(view, gainDhHour), "#22c55e"),
       ],
     },
-    options: chartOptions("DH/min"),
-    plugins: [minuteCursorPlugin, transitionMarkerPlugin],
+    options: chartOptions("DH/h"),
+    plugins: [hourCursorPlugin, transitionMarkerPlugin],
   });
 
   updateLatestChartBadges();
@@ -412,7 +414,7 @@ function updateChartsLive(): void {
     return;
   }
   const view = getChartView();
-  if (view.windowStartMinute !== chartWindowStart || activeCharts[0]?.data.labels?.length !== view.labels.length) {
+  if (view.windowStartHour !== chartWindowStart || activeCharts[0]?.data.labels?.length !== view.labels.length) {
     renderCharts();
     return;
   }
@@ -447,9 +449,9 @@ function updateChartsLive(): void {
       chartValues(view, (state) => state.cumulativeGainDh),
     ],
     [
-      chartValues(view, baselineCostDhMin),
-      chartValues(view, emsCostDhMin),
-      chartValues(view, gainDhMin),
+      chartValues(view, baselineCostDhHour),
+      chartValues(view, emsCostDhHour),
+      chartValues(view, gainDhHour),
     ],
   ];
 
@@ -460,10 +462,15 @@ function updateChartsLive(): void {
     });
     chart.update("none");
   });
+  if (excelModeActive) {
+    console.log("History length:", view.states.length);
+    console.log("Chart 1 data:", chartData[0]?.[0] ?? []);
+    console.log("Chart 2 data:", chartData[1]?.[0] ?? []);
+  }
   updateLatestChartBadges();
 }
 
-const minuteCursorPlugin: Plugin<"line"> = {
+const hourCursorPlugin: Plugin<"line"> = {
   id: "minuteCursor",
   afterDraw(chart) {
     const xScale = chart.scales.x;
@@ -609,77 +616,81 @@ function chartOptions(yTitle: string, stacked = false) {
 
 function getChartView(): ChartView {
   if (chartWindowMode === "year" && excelModeActive) {
-    const states = minuteStates.filter((_, index) => index % 60 === 0 && index <= currentMinute);
+    const states = hourStates.filter((_, index) => index % 24 === 0 && index <= currentHour);
     return {
       states,
-      labels: states.map((_, index) => index % 24 === 0 ? `D${Math.floor(index / 24) + 1}` : ""),
-      windowStartMinute: states[0]?.minute ?? 0,
+      labels: states.map((_, index) => `D${index + 1}`),
+      windowStartHour: states[0]?.minute ?? 0,
     };
   }
 
-  const dayStart = Math.floor(currentMinute / 1440) * 1440;
-  const dayEnd = Math.min(getLastMinuteIndex(), dayStart + 1439);
+  const dayStart = Math.floor(currentHour / 24) * 24;
+  const dayEnd = Math.min(getLastHourIndex(), dayStart + 23);
   let start = dayStart;
-  let end = dayEnd;
-  if (chartWindowMode === "1h") start = Math.max(dayStart, currentMinute - 59);
-  if (chartWindowMode === "6h") start = Math.max(dayStart, currentMinute - 359);
-  if (chartWindowMode === "day" || chartWindowMode === "full-day") {
-    start = dayStart;
-    end = dayEnd;
-  } else {
-    end = currentMinute;
+  let end = Math.min(currentHour, dayEnd);
+  if (chartWindowMode === "24h") {
+    start = Math.max(0, currentHour - 23);
+    end = currentHour;
   }
-  const states = minuteStates.slice(start, end + 1);
+  if (chartWindowMode === "7d") {
+    start = Math.max(0, currentHour - 167);
+    end = currentHour;
+  }
+  if (chartWindowMode === "day") {
+    start = dayStart;
+    end = Math.min(currentHour, dayEnd);
+  }
+  const states = hourStates.slice(start, end + 1);
   return {
     states,
-    labels: states.map((state, index) => index % 60 === 0 || states.length <= 90 ? state.timeLabel : ""),
-    windowStartMinute: start,
+    labels: states.map((state, index) => states.length <= 48 || index % 24 === 0 ? state.timeLabel : ""),
+    windowStartHour: start,
   };
 }
 
-function chartValues(view: ChartView, getValue: (state: DisplayMinuteState) => number): Array<number | null> {
-  return view.states.map((state) => state.minute <= currentMinute ? finiteOrZero(getValue(state)) : null);
+function chartValues(view: ChartView, getValue: (state: DisplayHourState) => number): Array<number | null> {
+  return view.states.map((state) => state.minute <= currentHour ? finiteOrZero(getValue(state)) : null);
 }
 
 function getMarkerIndex(hour: number): number {
   if (chartWindowMode === "year") return -1;
-  const markerMinute = Math.floor(currentMinute / 1440) * 1440 + hour * 60;
-  return markerMinute - chartWindowStart;
+  const markerHour = Math.floor(currentHour / 24) * 24 + hour;
+  return markerHour - chartWindowStart;
 }
 
 function getCurrentChartIndex(labelCount: number): number {
   if (chartWindowMode === "year") return Math.max(0, labelCount - 1);
-  return currentMinute - chartWindowStart;
+  return currentHour - chartWindowStart;
 }
 
-function cumulativeBaselineCostDh(state: DisplayMinuteState): number {
+function cumulativeBaselineCostDh(state: DisplayHourState): number {
   if (isExcelState(state)) return state.cumulativeBaselineCostDh;
   return cumulativeCostUntil(state.minute, "baseline");
 }
 
-function baselineCostDhMin(state: DisplayMinuteState): number {
+function baselineCostDhHour(state: DisplayHourState): number {
   if (isExcelState(state)) return state.baselineCostDh;
   return (state.loadMW / 60) * 1000 * state.tariffDhPerKWh;
 }
 
-function emsCostDhMin(state: DisplayMinuteState): number {
+function emsCostDhHour(state: DisplayHourState): number {
   if (isExcelState(state)) return state.costDh;
   return (state.gridImportMW / 60) * 1000 * state.tariffDhPerKWh - (state.wheelingMW / 60) * 1000 * 0.7131;
 }
 
-function gainDhMin(state: DisplayMinuteState): number {
-  return baselineCostDhMin(state) - emsCostDhMin(state);
+function gainDhHour(state: DisplayHourState): number {
+  return baselineCostDhHour(state) - emsCostDhHour(state);
 }
 
-function cumulativeEmsCostDh(state: DisplayMinuteState): number {
+function cumulativeEmsCostDh(state: DisplayHourState): number {
   if (isExcelState(state)) return state.cumulativeEmsCostDh;
   return cumulativeCostUntil(state.minute, "ems");
 }
 
 function cumulativeCostUntil(minute: number, kind: "baseline" | "ems"): number {
   let total = 0;
-  for (let index = 0; index <= minute && index < minuteStates.length; index += 1) {
-    const state = minuteStates[index];
+  for (let index = 0; index <= minute && index < hourStates.length; index += 1) {
+    const state = hourStates[index];
     const baseline = (state.loadMW / 60) * 1000 * state.tariffDhPerKWh;
     const ems = (state.gridImportMW / 60) * 1000 * state.tariffDhPerKWh;
     total += kind === "baseline" ? baseline : ems;
@@ -688,22 +699,22 @@ function cumulativeCostUntil(minute: number, kind: "baseline" | "ems"): number {
 }
 
 function updateLatestChartBadges(): void {
-  const state = minuteStates[currentMinute];
+  const state = hourStates[currentHour];
   if (!state) return;
-  setText("supplyMixLatest", `PV ${formatNumber(state.pvToLoadMW, 1)} | BESS ${formatNumber(state.bessToLoadMW, 1)} | Grid ${formatNumber(state.gridToLoadMW, 1)} MW`);
+  setText("supplyMixLatest", `PV ${formatNumber(state.pvToLoadMW, 1)} | BESS ${formatNumber(state.bessToLoadMW, 1)} | Grid ${formatNumber(state.gridToLoadMW, 1)} MWh`);
   setText("bessPowerLatest", `${state.bessPowerMW >= 0 ? "Charge" : "Discharge"} ${formatSigned(state.bessPowerMW, 1)} MW`);
-  setText("pvAllocationLatest", `Load ${formatNumber(state.pvToLoadMW, 1)} | BESS ${formatNumber(state.pvToBessMW, 1)} | Wheel ${formatNumber(state.pvToWheelingMW, 1)} MW`);
-  setText("gridBreakdownLatest", `Load ${formatNumber(state.gridToLoadMW, 1)} | BESS ${formatNumber(state.gridToBessMW, 1)} | Total ${formatNumber(state.gridImportMW, 1)} MW`);
+  setText("pvAllocationLatest", `Load ${formatNumber(state.pvToLoadMW, 1)} | BESS ${formatNumber(state.pvToBessMW, 1)} | Wheel ${formatNumber(state.pvToWheelingMW, 1)} MWh`);
+  setText("gridBreakdownLatest", `Load ${formatNumber(state.gridToLoadMW, 1)} | BESS ${formatNumber(state.gridToBessMW, 1)} | Total ${formatNumber(state.gridImportMW, 1)} MWh`);
   setText("socLatest", `${formatNumber(state.socPercent, 1)}%`);
   setText("economicLatest", `Gain ${formatNumber(state.cumulativeGainDh, 0)} DH`);
-  setText("minuteCostLatest", `Baseline ${formatNumber(baselineCostDhMin(state), 1)} | EMS ${formatNumber(emsCostDhMin(state), 1)} | Gain ${formatNumber(gainDhMin(state), 1)} DH/min`);
+  setText("hourCostLatest", `Baseline ${formatNumber(baselineCostDhHour(state), 1)} | EMS ${formatNumber(emsCostDhHour(state), 1)} | Gain ${formatNumber(gainDhHour(state), 1)} DH/h`);
 }
 
-function renderEnergyInterpretation(state: DisplayMinuteState): void {
+function renderEnergyInterpretation(state: DisplayHourState): void {
   const balanceOk = !isExcelState(state) || state.energyBalanceOk;
   let text = "OCP load is currently supplied by ONEE grid because PV = 0 MW and BESS is in standby.";
   if (!balanceOk) {
-    text = "ENERGY BALANCE ERROR detected. Verify PV, BESS, grid, load, and wheeling flows for this minute.";
+    text = "ENERGY BALANCE ERROR detected. Verify PV, BESS, grid, load, and wheeling flows for this hour.";
   } else if (state.bessToLoadMW > 0.05 && state.tariff === "Pointe") {
     text = `BESS is discharging at ${formatNumber(state.bessToLoadMW, 1)} MW during peak tariff to reduce ONEE grid import.`;
   } else if (state.pvToBessMW > 0.05) {
@@ -715,7 +726,7 @@ function renderEnergyInterpretation(state: DisplayMinuteState): void {
   } else if (state.pvToLoadMW > 0.05 && state.gridToLoadMW > 0.05) {
     text = `OCP load is supplied by PV (${formatNumber(state.pvToLoadMW, 1)} MW) and ONEE grid (${formatNumber(state.gridToLoadMW, 1)} MW).`;
   } else if (state.pvToLoadMW >= state.loadMW - 0.05) {
-    text = "OCP load is fully supplied by PV production for this minute.";
+    text = "OCP load is fully supplied by PV production for this hour.";
   } else if (state.gridToBessMW <= 0.05 && (state.tariff === "Pleines" || state.tariff === "Pointe")) {
     text = `Grid-to-BESS charging is locked because current tariff is ${state.tariff}.`;
   }
@@ -757,8 +768,8 @@ async function loadExcelData(selectedFile?: File): Promise<void> {
       allowNightGridCharging: getElement<HTMLInputElement>("allowNightGridCharging").checked,
       initialSocPercent: 0,
     }, file.name);
-    console.log("Minute records:", latestExcelResult.minuteStates.length);
-    setText("excelStatus", `EXCEL DATA LOADED — ${formatNumber(hourlyRecords.length, 0)} HOURS / ${formatNumber(latestExcelResult.minuteStates.length, 0)} MINUTES`);
+    console.log("Hourly SCADA records:", latestExcelResult.hourStates.length);
+    setText("excelStatus", `EXCEL DATA LOADED - ${formatNumber(hourlyRecords.length, 0)} HOURS`);
     setBadge("pvgisStatus", "PVGIS FALLBACK: EXCEL PROFILE", "warning");
     startExcelMode();
   } catch (error) {
@@ -777,14 +788,14 @@ function startExcelMode(): void {
 
   pauseSimulation(false);
   excelModeActive = true;
-  minuteStates = latestExcelResult.minuteStates;
-  currentMinute = 0;
+  hourStates = latestExcelResult.hourStates;
+  currentHour = 0;
   chartWindowStart = 0;
-  lastLoggedMinute = null;
-  visibleMinuteLogRows.length = 0;
-  renderMinuteLog();
+  lastLoggedHour = null;
+  visibleHourLogRows.length = 0;
+  renderHourLog();
   renderCharts();
-  renderMinute(currentMinute);
+  renderHour(currentHour);
   renderExcelKpis();
   setBadge("emsStatusBadge", "EMS READY", "ready");
 }
@@ -802,45 +813,46 @@ function resetExcelMode(): void {
 }
 
 function runCurrentDay(): void {
-  const nextDayEnd = Math.min(getLastMinuteIndex(), Math.floor(currentMinute / 1440) * 1440 + 1439);
-  currentMinute = nextDayEnd;
-  renderMinute(currentMinute);
+  const nextDayEnd = Math.min(getLastHourIndex(), Math.floor(currentHour / 24) * 24 + 23);
+  currentHour = nextDayEnd;
+  renderHour(currentHour);
 }
 
 function runFullExcel(): void {
   if (!excelModeActive) startExcelMode();
   if (!excelModeActive) return;
-  currentMinute = getLastMinuteIndex();
-  renderMinute(currentMinute);
-  setBadge("emsStatusBadge", "FULL EXCEL SCADA TEST COMPLETED", "ready");
+  currentHour = getLastHourIndex();
+  renderHour(currentHour);
+  setBadge("emsStatusBadge", "FULL EXCEL HOURLY SCADA TEST COMPLETED", "ready");
 }
 
-function renderExcelProgress(state: DisplayMinuteState): void {
+function renderExcelProgress(state: DisplayHourState): void {
   if (!excelModeActive || !isExcelState(state)) {
     setText("excelProgress", "Waiting for 8760-hour workbook");
     return;
   }
 
-  const completion = ((state.minute + 1) / EXCEL_SCADA_EXPECTED_MINUTES) * 100;
-  const remainingMinutes = EXCEL_SCADA_EXPECTED_MINUTES - state.minute - 1;
+  const completion = ((state.minute + 1) / EXCEL_SCADA_EXPECTED_STEPS) * 100;
+  const remainingHours = EXCEL_SCADA_EXPECTED_STEPS - state.minute - 1;
   setText("excelProgress", [
     `Excel row ${formatNumber(state.excelRowIndex + 1, 0)} / ${formatNumber(EXCEL_SCADA_EXPECTED_HOURS, 0)}`,
-    `Minute step ${formatNumber(state.minute + 1, 0)} / ${formatNumber(EXCEL_SCADA_EXPECTED_MINUTES, 0)}`,
+    `Hour step ${formatNumber(state.minute + 1, 0)} / ${formatNumber(EXCEL_SCADA_EXPECTED_STEPS, 0)}`,
+    `Current time ${state.timestamp.replace("T", " ")}`,
     `Day ${formatNumber(state.dayNumber, 0)} / 365`,
     `Completion ${formatNumber(completion, 2)}%`,
-    `Remaining ${formatNumber(remainingMinutes, 0)} simulated minutes`,
+    currentHour >= getLastHourIndex() ? "FULL EXCEL HOURLY SCADA TEST COMPLETED" : `Remaining ${formatNumber(remainingHours, 0)} simulated hours`,
   ].join("\n"));
 }
 
-function renderLiveMinuteState(state: DisplayMinuteState): void {
+function renderLiveHourState(state: DisplayHourState): void {
   const balanceOk = !isExcelState(state) || Math.abs(state.energyBalanceError) <= 1e-8;
   if (isExcelState(state) && latestExcelResult) {
-    const pointer = getExcelMinutePointer(latestExcelResult.hourlyRecords, state.minute);
+    const pointer = getExcelHourPointer(latestExcelResult.hourlyRecords, state.minute);
     setElementHtml("liveMinuteState", [
-      ["Current minute", pointer.timestamp.replace("T", " ").slice(0, 16)],
+      ["Current hour", pointer.timestamp.replace("T", " ").slice(0, 16)],
       ["Excel row", `${formatNumber(pointer.hourIndex + 1, 0)} / ${formatNumber(EXCEL_SCADA_EXPECTED_HOURS, 0)}`],
-      ["Minute inside hour", `${formatNumber(pointer.minuteInsideHour, 0)} / 59`],
-      ["Global minute", `${formatNumber(pointer.currentMinuteIndex + 1, 0)} / ${formatNumber(pointer.totalMinutes, 0)}`],
+      ["Hour of day", `${String(pointer.hourOfDay).padStart(2, "0")}h`],
+      ["Hour index", `${formatNumber(pointer.currentHourIndex + 1, 0)} / ${formatNumber(pointer.totalHours, 0)}`],
       ["Day", `${formatNumber(pointer.dayNumber, 0)} / 365`],
       ["Progress", `${formatNumber(pointer.progressPercent, 2)}%`],
       ["Tariff", state.tariff],
@@ -852,10 +864,10 @@ function renderLiveMinuteState(state: DisplayMinuteState): void {
   }
 
   setElementHtml("liveMinuteState", [
-    ["Current minute", `${simulationDate} ${state.timeLabel}`],
+    ["Current hour", `${simulationDate} ${state.timeLabel}`],
     ["Excel row", "--"],
-    ["Minute inside hour", `${formatNumber(state.minute % 60, 0)} / 59`],
-    ["Global minute", `${formatNumber(state.minute + 1, 0)} / 1,440`],
+    ["Hour of day", `${formatNumber(Math.floor(state.minute / 60), 0)}h`],
+    ["Hour index", `${formatNumber(Math.floor(state.minute / 60) + 1, 0)} / 24`],
     ["Day", "1 / 1"],
     ["Progress", `${formatNumber(((state.minute + 1) / 1440) * 100, 2)}%`],
     ["Tariff", state.tariff],
@@ -865,33 +877,38 @@ function renderLiveMinuteState(state: DisplayMinuteState): void {
   ].map(([label, value]) => `<span>${escapeHtml(label)}</span><span>${escapeHtml(value)}</span>`).join(""));
 }
 
-function renderEnergyThisMinute(state: DisplayMinuteState): void {
+function renderEnergyThisHour(state: DisplayHourState): void {
   const pvMWh = isExcelState(state) ? state.pvMWh : state.pvMW / 60;
   const loadMWh = isExcelState(state) ? state.loadMWh : state.loadMW / 60;
-  const gridMWh = isExcelState(state) ? state.gridImportMWh : state.gridImportMW / 60;
-  const bessMWh = isExcelState(state) ? state.bessChargeMWh - state.bessDischargeMWh : state.bessPowerMW / 60;
   const wheelingMWh = isExcelState(state) ? state.wheelingMWh : state.wheelingMW / 60;
   const costDh = isExcelState(state) ? state.costDh : state.netCostDhPerHour / 60;
   const gainDh = isExcelState(state) ? state.baselineCostDh - state.costDh : 0;
   setElementHtml("energyThisMinute", [
-    ["PV", `${formatNumber(pvMWh, 3)} MWh`],
-    ["Load", `${formatNumber(loadMWh, 3)} MWh`],
-    ["Grid", `${formatNumber(gridMWh, 3)} MWh`],
-    ["BESS", `${formatSigned(bessMWh, 3)} MWh`],
+    ["PV production", `${formatNumber(pvMWh, 3)} MWh`],
+    ["OCP consumption", `${formatNumber(loadMWh, 3)} MWh`],
+    ["PV to load", `${formatNumber(isExcelState(state) ? state.pvToLoadMWh : state.pvToLoadMW / 60, 3)} MWh`],
+    ["PV to BESS", `${formatNumber(isExcelState(state) ? state.pvToBessMWh : state.pvToBessMW / 60, 3)} MWh`],
+    ["BESS to load", `${formatNumber(isExcelState(state) ? state.bessDischargeMWh : state.bessToLoadMW / 60, 3)} MWh`],
+    ["Grid to load", `${formatNumber(isExcelState(state) ? state.gridToLoadMWh : state.gridToLoadMW / 60, 3)} MWh`],
+    ["Grid to BESS", `${formatNumber(isExcelState(state) ? state.gridToBessMWh : state.gridToBessMW / 60, 3)} MWh`],
     ["Wheeling", `${formatNumber(wheelingMWh, 3)} MWh`],
-    ["Cost", `${formatNumber(costDh, 3)} DH/min`],
-    ["Gain", `${formatNumber(gainDh, 3)} DH/min`],
+    ["SoC start", `${formatNumber(isExcelState(state) ? state.socStartPercent : state.socPercent, 2)}%`],
+    ["SoC end", `${formatNumber(isExcelState(state) ? state.socEndPercent : state.socPercent, 2)}%`],
+    ["Cost this hour", `${formatNumber(costDh, 3)} DH`],
+    ["Gain this hour", `${formatNumber(gainDh, 3)} DH`],
   ].map(([label, value]) => `<span>${escapeHtml(label)}</span><span>${escapeHtml(value)}</span>`).join(""));
 }
 
-function renderCurrentMinuteSummary(state: DisplayMinuteState): void {
+function renderCurrentHourSummary(state: DisplayHourState): void {
   const timestamp = isExcelState(state) ? state.timestamp.replace("T", " ").slice(0, 16) : `${simulationDate} ${state.timeLabel}`;
   const excelRow = isExcelState(state) ? `${formatNumber(state.excelRowIndex + 1, 0)} / ${formatNumber(EXCEL_SCADA_EXPECTED_HOURS, 0)}` : "--";
   const balance = !isExcelState(state) || Math.abs(state.energyBalanceError) <= 1e-8 ? "OK" : "ERROR";
   const items = [
     ["Timestamp", timestamp],
-    ["Minute index", formatNumber(state.minute + 1, 0)],
+    ["Hour index", formatNumber(state.minute + 1, 0)],
     ["Excel row", excelRow],
+    ["Day", `${formatNumber(isExcelState(state) ? state.dayNumber : 1, 0)} / ${excelModeActive ? "365" : "1"}`],
+    ["Hour of day", `${String(isExcelState(state) ? state.hourOfDay : Math.floor(state.minute / 60)).padStart(2, "0")}h`],
     ["PV MW", formatNumber(state.pvMW, 2)],
     ["Load MW", formatNumber(state.loadMW, 2)],
     ["BESS MW", formatSigned(state.bessPowerMW, 2)],
@@ -903,7 +920,7 @@ function renderCurrentMinuteSummary(state: DisplayMinuteState): void {
     ["Command", state.command],
     ["Balance", balance],
   ];
-  setElementHtml("currentMinuteSummary", items.map(([label, value]) => `
+  setElementHtml("currentHourSummary", items.map(([label, value]) => `
     <div class="summary-item">
       <div class="summary-label">${escapeHtml(label)}</div>
       <div class="summary-value">${escapeHtml(value)}</div>
@@ -929,16 +946,15 @@ function modeBadge(mode: string, supportMode: "D" | null): string {
   return `<span class="log-badge mode">${escapeHtml(`${mode}${supportMode ? " + D" : ""}`)}</span>`;
 }
 
-function appendMinuteLogRow(state: DisplayMinuteState): void {
-  if (lastLoggedMinute === state.minute) return;
-  lastLoggedMinute = state.minute;
-  const minuteNumber = state.minute + 1;
+function appendHourLogRow(state: DisplayHourState): void {
+  if (lastLoggedHour === state.minute) return;
+  lastLoggedHour = state.minute;
   const excelRow = isExcelState(state) ? state.excelRowIndex + 1 : Math.floor(state.minute / 60) + 1;
   const costDh = isExcelState(state) ? state.costDh : state.netCostDhPerHour / 60;
   const gainDh = isExcelState(state) ? state.baselineCostDh - state.costDh : 0;
   const balance = !isExcelState(state) || Math.abs(state.energyBalanceError) <= 1e-8 ? "OK" : "ERROR";
   const hasAlarm = state.rampEvent || state.gridImportMW >= 20 || state.socPercent <= 18 || state.socPercent >= 92 || balance === "ERROR";
-  visibleMinuteLogRows.push({
+  visibleHourLogRows.push({
     mode: state.emsMode,
     hasAlarm,
     hasBalanceError: balance === "ERROR",
@@ -946,45 +962,51 @@ function appendMinuteLogRow(state: DisplayMinuteState): void {
     html: `
     <tr class="latest-row">
       <td>${escapeHtml(isExcelState(state) ? state.timestamp.replace("T", " ").slice(0, 16) : `${simulationDate} ${state.timeLabel}`)}</td>
-      <td>${formatNumber(minuteNumber, 0)}</td>
       <td>${formatNumber(excelRow, 0)}</td>
-      <td>${formatNumber(state.pvMW, 2)}</td>
-      <td>${formatNumber(state.loadMW, 2)}</td>
+      <td>${formatNumber(isExcelState(state) ? state.pvMWh : state.pvMW / 60, 3)}</td>
+      <td>${formatNumber(isExcelState(state) ? state.loadMWh : state.loadMW / 60, 3)}</td>
+      <td>${formatNumber(isExcelState(state) ? state.pvToLoadMWh : state.pvToLoadMW / 60, 3)}</td>
+      <td>${formatNumber(isExcelState(state) ? state.pvToBessMWh : state.pvToBessMW / 60, 3)}</td>
+      <td>${formatNumber(isExcelState(state) ? state.bessDischargeMWh : state.bessToLoadMW / 60, 3)}</td>
+      <td>${formatNumber(isExcelState(state) ? state.gridToLoadMWh : state.gridToLoadMW / 60, 3)}</td>
+      <td>${formatNumber(isExcelState(state) ? state.gridToBessMWh : state.gridToBessMW / 60, 3)}</td>
+      <td>${formatNumber(isExcelState(state) ? state.wheelingMWh : state.wheelingMW / 60, 3)}</td>
       <td>${formatSigned(state.bessPowerMW, 2)}</td>
-      <td>${formatNumber(state.socPercent, 1)}</td>
-      <td>${formatNumber(state.gridImportMW, 2)}</td>
-      <td>${formatNumber(state.wheelingMW, 2)}</td>
+      <td>${formatNumber(isExcelState(state) ? state.socStartPercent : state.socPercent, 1)}</td>
+      <td>${formatNumber(isExcelState(state) ? state.socEndPercent : state.socPercent, 1)}</td>
       <td>${tariffBadge(state.tariff)}</td>
       <td>${modeBadge(state.emsMode, state.supportMode)}</td>
       <td>${escapeHtml(state.command)}</td>
       <td>${formatNumber(costDh, 3)}</td>
       <td>${formatNumber(gainDh, 3)}</td>
+      <td>${formatNumber(state.cumulativeGainDh, 3)}</td>
       <td><span class="${balance === "OK" ? "balance-ok" : "balance-error"}">${balance}</span></td>
     </tr>
   `,
   });
-  while (visibleMinuteLogRows.length > 120) visibleMinuteLogRows.shift();
-  renderMinuteLog();
+  while (visibleHourLogRows.length > 500) visibleHourLogRows.shift();
+  renderHourLog();
 }
 
-function appendTransitionMessages(previousMinute: number, nextMinute: number): void {
-  const start = previousMinute + 1;
-  for (let minute = start; minute <= nextMinute; minute += 1) {
-    const state = minuteStates[minute];
-    if (!state || minute % 60 !== 0) continue;
+function appendTransitionMessages(previousHour: number, nextHour: number): void {
+  const start = Math.min(previousHour, nextHour) + 1;
+  const end = Math.max(previousHour, nextHour);
+  for (let hour = start; hour <= end; hour += 1) {
+    const state = hourStates[hour];
+    if (!state) continue;
     const time = state.timeLabel;
     const message = getTransitionMessage(time);
     if (!message) continue;
-    visibleMinuteLogRows.push({
+    visibleHourLogRows.push({
       html: `<tr class="event-row"><td colspan="15">${escapeHtml(isExcelState(state) ? state.timestamp.replace("T", " ").slice(0, 16) : `${simulationDate} ${time}`)} - ${escapeHtml(message)}</td></tr>`,
       mode: state.emsMode,
       hasAlarm: true,
       hasBalanceError: false,
       isEvent: true,
     });
-    while (visibleMinuteLogRows.length > 120) visibleMinuteLogRows.shift();
+    while (visibleHourLogRows.length > 500) visibleHourLogRows.shift();
   }
-  renderMinuteLog();
+  renderHourLog();
 }
 
 function getTransitionMessage(timeLabel: string): string | null {
@@ -995,8 +1017,8 @@ function getTransitionMessage(timeLabel: string): string | null {
   return null;
 }
 
-function renderMinuteLog(): void {
-  const filteredRows = visibleMinuteLogRows.filter((row) => {
+function renderHourLog(): void {
+  const filteredRows = visibleHourLogRows.filter((row) => {
     if (activeLogFilter === "all") return true;
     if (activeLogFilter === "alarms") return row.hasAlarm;
     if (activeLogFilter === "balance") return row.hasBalanceError;
@@ -1026,11 +1048,11 @@ function renderExcelKpis(): void {
   ].join("\n"));
 }
 
-function getLastMinuteIndex(): number {
-  return Math.max(0, minuteStates.length - 1);
+function getLastHourIndex(): number {
+  return Math.max(0, hourStates.length - 1);
 }
 
-function isExcelState(state: DisplayMinuteState): state is ExcelMinuteScadaState {
+function isExcelState(state: DisplayHourState): state is ExcelHourScadaState {
   return "excelRowIndex" in state;
 }
 
@@ -1043,15 +1065,15 @@ function formatExcelLoadError(error: unknown): string {
 function exportCsv(): void {
   if (excelModeActive && latestExcelResult) {
     downloadText(
-      `ocp_excel_scada_minute_log_${latestExcelResult.minuteStates[0].timestamp.slice(0, 10)}.csv`,
-      exportExcelMinuteLogCsv(latestExcelResult.minuteStates),
+      `ocp_excel_scada_hourly_log_${latestExcelResult.hourStates[0].timestamp.slice(0, 10)}.csv`,
+      exportExcelHourlyLogCsv(latestExcelResult.hourStates),
       "text/csv",
     );
     return;
   }
 
   const header = [
-    "minute",
+    "hour",
     "time",
     "pv_mw",
     "load_mw",
@@ -1064,7 +1086,7 @@ function exportCsv(): void {
     "command",
     "cumulative_gain_dh",
   ];
-  const rows = minuteStates.map((state) => [
+  const rows = hourStates.map((state) => [
     state.minute,
     state.timeLabel,
     state.pvMW,
@@ -1084,7 +1106,7 @@ function exportCsv(): void {
 function exportJson(): void {
   if (excelModeActive && latestExcelResult) {
     downloadText(
-      `ocp_excel_scada_full_year_${latestExcelResult.minuteStates[0].timestamp.slice(0, 10)}.json`,
+      `ocp_excel_scada_full_year_${latestExcelResult.hourStates[0].timestamp.slice(0, 10)}.json`,
       exportExcelSummaryJson(latestExcelResult),
       "application/json",
     );
@@ -1098,7 +1120,7 @@ function exportJson(): void {
       simulationDate,
       pvgis: latestPvgis,
       weather: latestWeather,
-      minuteStates,
+      hourStates,
     }, null, 2),
     "application/json",
   );
@@ -1106,15 +1128,61 @@ function exportJson(): void {
 
 function exportHourlySummary(): void {
   if (!excelModeActive || !latestExcelResult) {
-    setText("excelStatus", "Hourly export is available after loading Excel full-year mode.");
+    setText("excelStatus", "Daily export is available after loading Excel full-year mode.");
     return;
   }
 
   downloadText(
-    `ocp_excel_scada_hourly_summary_${latestExcelResult.minuteStates[0].timestamp.slice(0, 10)}.csv`,
-    exportExcelHourlySummaryCsv(latestExcelResult.hourlySummaries),
+    `ocp_excel_scada_daily_summary_${latestExcelResult.hourStates[0].timestamp.slice(0, 10)}.csv`,
+    exportDailySummaryCsv(latestExcelResult.hourStates),
     "text/csv",
   );
+}
+
+function exportDailySummaryCsv(states: ExcelHourScadaState[]): string {
+  const header = [
+    "day",
+    "date",
+    "pv_mwh",
+    "load_mwh",
+    "grid_import_mwh",
+    "bess_charge_mwh",
+    "bess_discharge_mwh",
+    "wheeling_mwh",
+    "soc_end_percent",
+    "cost_dh",
+    "baseline_cost_dh",
+    "gain_dh",
+    "balance_errors",
+  ];
+  const rows: Array<Array<string | number>> = [header];
+  for (let start = 0; start < states.length; start += 24) {
+    const dayStates = states.slice(start, start + 24);
+    if (dayStates.length === 0) continue;
+    rows.push([
+      Math.floor(start / 24) + 1,
+      dayStates[0].timestamp.slice(0, 10),
+      sumNumber(dayStates, "pvMWh"),
+      sumNumber(dayStates, "loadMWh"),
+      sumNumber(dayStates, "gridImportMWh"),
+      sumNumber(dayStates, "bessChargeMWh"),
+      sumNumber(dayStates, "bessDischargeMWh"),
+      sumNumber(dayStates, "wheelingMWh"),
+      dayStates[dayStates.length - 1].socEndPercent,
+      sumNumber(dayStates, "costDh"),
+      sumNumber(dayStates, "baselineCostDh"),
+      sumNumber(dayStates, "baselineCostDh") - sumNumber(dayStates, "costDh"),
+      dayStates.filter((state) => !state.energyBalanceOk).length,
+    ]);
+  }
+  return rows.map((row) => row.map((value) => typeof value === "number" ? String(Number(value.toFixed(6))) : value).join(",")).join("\n");
+}
+
+function sumNumber(states: ExcelHourScadaState[], key: keyof ExcelHourScadaState): number {
+  return states.reduce((total, state) => {
+    const value = state[key];
+    return total + (typeof value === "number" ? value : 0);
+  }, 0);
 }
 
 function downloadText(filename: string, content: string, mimeType: string): void {
@@ -1178,3 +1246,6 @@ function escapeHtml(value: string): string {
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
 }
+
+
+

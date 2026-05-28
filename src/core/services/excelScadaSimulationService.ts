@@ -5,8 +5,7 @@ import { OFF_PEAK_TARIFF_DH_PER_KWH } from "../constants/ocpDefaults.ts";
 
 export const EXCEL_SCADA_SHEET_NAME = "data base 2025(1)";
 export const EXCEL_SCADA_EXPECTED_HOURS = 8760;
-export const EXCEL_SCADA_MINUTES_PER_HOUR = 60;
-export const EXCEL_SCADA_EXPECTED_MINUTES = EXCEL_SCADA_EXPECTED_HOURS * EXCEL_SCADA_MINUTES_PER_HOUR;
+export const EXCEL_SCADA_EXPECTED_STEPS = EXCEL_SCADA_EXPECTED_HOURS;
 
 export interface ExcelHourlyRecord {
   rowIndex: number;
@@ -22,12 +21,13 @@ export interface NormalizedExcelScadaRow {
   consumption_mwh: unknown;
 }
 
-export interface ExcelMinuteScadaState {
+export interface ExcelHourScadaState {
+  hourIndex: number;
   minute: number;
   timestamp: string;
   timeLabel: string;
   excelRowIndex: number;
-  minuteIndexInHour: number;
+  hourOfDay: number;
   dayNumber: number;
   pvMW: number;
   loadMW: number;
@@ -60,11 +60,21 @@ export interface ExcelMinuteScadaState {
   bessDischargeMWh: number;
   gridImportMWh: number;
   wheelingMWh: number;
+  gridToLoadMWh: number;
+  gridToBessMWh: number;
+  pvToBessMWh: number;
+  bessPowerMWh: number;
+  bessEnergyStartMWh: number;
+  bessEnergyEndMWh: number;
+  socStartPercent: number;
+  socEndPercent: number;
   rampEvent: boolean;
   alarmCount: number;
   energyBalanceError: number;
   energyBalanceOk: boolean;
 }
+
+export type ExcelMinuteScadaState = ExcelHourScadaState;
 
 export interface ExcelHourlySummary {
   timestamp: string;
@@ -102,17 +112,18 @@ export interface ExcelScadaKpis {
 export interface ExcelScadaSimulationResult {
   sourceName: string;
   hourlyRecords: ExcelHourlyRecord[];
-  minuteStates: ExcelMinuteScadaState[];
+  hourStates: ExcelHourScadaState[];
+  minuteStates: ExcelHourScadaState[];
   hourlySummaries: ExcelHourlySummary[];
   kpis: ExcelScadaKpis;
   completed: boolean;
 }
 
-export interface ExcelMinutePointer {
-  currentMinuteIndex: number;
+export interface ExcelHourPointer {
+  currentHourIndex: number;
   hourIndex: number;
-  minuteInsideHour: number;
-  totalMinutes: number;
+  hourOfDay: number;
+  totalHours: number;
   dayNumber: number;
   progressPercent: number;
   timestamp: string;
@@ -218,7 +229,7 @@ export function simulateExcelScadaFullYear(
   let totalWheelingMWh = 0;
   let alarmCount = 0;
   let energyBalanceErrorCount = 0;
-  const minuteStates: ExcelMinuteScadaState[] = [];
+  const hourStates: ExcelHourScadaState[] = [];
   const hourlySummaries: ExcelHourlySummary[] = [];
 
   hourlyRecords.forEach((record, hourIndex) => {
@@ -228,146 +239,155 @@ export function simulateExcelScadaFullYear(
     const previousPvMW = hourIndex > 0 ? hourlyRecords[hourIndex - 1].productionMWh : record.productionMWh;
     const rampEvent = Math.abs(record.productionMWh - previousPvMW) > rampThresholdMW;
     const supportMode: "D" | null = rampEvent ? "D" : null;
+    const bessEnergyStartMWh = bessEnergyMWh;
     const socStartPercent = toSocPercent(bessEnergyMWh);
-    const summaryStartIndex = minuteStates.length;
+    const pvMWh = record.productionMWh;
+    const loadMWh = record.consumptionMWh;
+    let remainingPvMWh = pvMWh;
+    let remainingLoadMWh = loadMWh;
+    const pvToLoadMWh = Math.min(remainingPvMWh, remainingLoadMWh);
+    remainingPvMWh -= pvToLoadMWh;
+    remainingLoadMWh -= pvToLoadMWh;
+    let pvToBessMWh = 0;
+    let gridToBessMWh = 0;
+    let bessDischargeMWh = 0;
+    let gridToLoadMWh = 0;
+    let wheelingMWh = 0;
 
-    for (let minuteInHour = 0; minuteInHour < EXCEL_SCADA_MINUTES_PER_HOUR; minuteInHour += 1) {
-      const minuteTimestamp = new Date(record.date.getTime() + minuteInHour * 60_000);
-      const pvMWh = record.productionMWh / EXCEL_SCADA_MINUTES_PER_HOUR;
-      const loadMWh = record.consumptionMWh / EXCEL_SCADA_MINUTES_PER_HOUR;
-      let remainingPvMWh = pvMWh;
-      let remainingLoadMWh = loadMWh;
-      let pvToLoadMWh = Math.min(remainingPvMWh, remainingLoadMWh);
-      remainingPvMWh -= pvToLoadMWh;
-      remainingLoadMWh -= pvToLoadMWh;
-      let bessChargeMWh = 0;
-      let bessDischargeMWh = 0;
-      let gridToLoadMWh = 0;
-      let gridToBessMWh = 0;
-      let wheelingMWh = 0;
-
-      if ((emsMode === "A" || supportMode === "D") && tariff.label !== "Pointe" && remainingPvMWh > 0) {
-        bessChargeMWh = Math.min(
-          remainingPvMWh,
-          BESS_POWER_LIMIT_MW / EXCEL_SCADA_MINUTES_PER_HOUR,
-          Math.max(0, (BESS_CAPACITY_MWH - bessEnergyMWh) / CHARGE_EFFICIENCY),
-        );
-        remainingPvMWh -= bessChargeMWh;
-        bessEnergyMWh += bessChargeMWh * CHARGE_EFFICIENCY;
-        wheelingMWh = Math.max(0, remainingPvMWh);
-      }
-
-      if (emsMode === "B" && remainingLoadMWh > 0) {
-        bessDischargeMWh = Math.min(
-          remainingLoadMWh,
-          BESS_POWER_LIMIT_MW / EXCEL_SCADA_MINUTES_PER_HOUR,
-          bessEnergyMWh * DISCHARGE_EFFICIENCY,
-        );
-        remainingLoadMWh -= bessDischargeMWh;
-        bessEnergyMWh -= bessDischargeMWh / DISCHARGE_EFFICIENCY;
-      }
-
-      if (emsMode === "C" && allowNightGridCharging && tariff.label === "Creuses" && bessEnergyMWh < targetSocMWh) {
-        gridToBessMWh = Math.min(
-          BESS_POWER_LIMIT_MW / EXCEL_SCADA_MINUTES_PER_HOUR,
-          Math.max(0, (targetSocMWh - bessEnergyMWh) / CHARGE_EFFICIENCY),
-        );
-        bessEnergyMWh += gridToBessMWh * CHARGE_EFFICIENCY;
-      }
-
-      gridToLoadMWh = Math.max(0, remainingLoadMWh);
-      bessEnergyMWh = clamp(bessEnergyMWh, 0, BESS_CAPACITY_MWH);
-      const gridImportMWh = gridToLoadMWh + gridToBessMWh;
-      const leftBalance = pvMWh + bessDischargeMWh + gridImportMWh;
-      const rightBalance = loadMWh + bessChargeMWh + wheelingMWh;
-      const energyBalanceError = round(leftBalance - rightBalance, 10);
-      const hasBalanceError = Math.abs(energyBalanceError) > BALANCE_TOLERANCE_MWH;
-      const minuteAlarmCount = Number(rampEvent) + Number(hasBalanceError) + Number(toSocPercent(bessEnergyMWh) >= 99.999);
-      alarmCount += minuteAlarmCount;
-      if (hasBalanceError) energyBalanceErrorCount += 1;
-
-      const costDh = gridImportMWh * 1000 * tariff.rateDhPerKWh - wheelingMWh * 1000 * WHEELING_VALUE_DH_PER_KWH;
-      const baselineCostDh = loadMWh * 1000 * tariff.rateDhPerKWh;
-      totalCostWithEmsDh += costDh;
-      baselineCostWithoutEmsDh += baselineCostDh;
-      cumulativeGainDh += baselineCostDh - costDh;
-      totalPvProductionMWh += pvMWh;
-      totalOcpConsumptionMWh += loadMWh;
-      totalGridImportMWh += gridImportMWh;
-      totalBessChargeMWh += bessChargeMWh;
-      totalBessDischargeMWh += bessDischargeMWh;
-      totalWheelingMWh += wheelingMWh;
-
-      minuteStates.push({
-        minute: minuteStates.length,
-        timestamp: formatTimestamp(minuteTimestamp),
-        timeLabel: formatTimeLabel(minuteTimestamp),
-        excelRowIndex: record.rowIndex,
-        minuteIndexInHour: minuteInHour,
-        dayNumber: Math.floor(hourIndex / 24) + 1,
-        pvMW: round(record.productionMWh, 6),
-        loadMW: round(record.consumptionMWh, 6),
-        bessPowerMW: round((bessChargeMWh + gridToBessMWh - bessDischargeMWh) * EXCEL_SCADA_MINUTES_PER_HOUR, 6),
-        socPercent: round(toSocPercent(bessEnergyMWh), 6),
-        socMWh: round(bessEnergyMWh, 6),
-        gridImportMW: round(gridImportMWh * EXCEL_SCADA_MINUTES_PER_HOUR, 6),
-        wheelingMW: round(wheelingMWh * EXCEL_SCADA_MINUTES_PER_HOUR, 6),
-        tariff: tariff.label,
-        tariffDhPerKWh: tariff.rateDhPerKWh,
-        emsMode,
-        supportMode,
-        command: getExcelCommand({ bessChargeMWh, bessDischargeMWh, gridToBessMWh, wheelingMWh, gridToLoadMWh }),
-        netCostDhPerHour: round(costDh * EXCEL_SCADA_MINUTES_PER_HOUR, 6),
-        costDh: round(costDh, 6),
-        baselineCostDh: round(baselineCostDh, 6),
-        cumulativeBaselineCostDh: round(baselineCostWithoutEmsDh, 6),
-        cumulativeEmsCostDh: round(totalCostWithEmsDh, 6),
-        cumulativeGainDh: round(cumulativeGainDh, 6),
-        pvToLoadMW: round(pvToLoadMWh * EXCEL_SCADA_MINUTES_PER_HOUR, 6),
-        pvToBessMW: round(bessChargeMWh * EXCEL_SCADA_MINUTES_PER_HOUR, 6),
-        pvToWheelingMW: round(wheelingMWh * EXCEL_SCADA_MINUTES_PER_HOUR, 6),
-        bessToLoadMW: round(bessDischargeMWh * EXCEL_SCADA_MINUTES_PER_HOUR, 6),
-        gridToLoadMW: round(gridToLoadMWh * EXCEL_SCADA_MINUTES_PER_HOUR, 6),
-        gridToBessMW: round(gridToBessMWh * EXCEL_SCADA_MINUTES_PER_HOUR, 6),
-        pvMWh: round(pvMWh, 10),
-        loadMWh: round(loadMWh, 10),
-        pvToLoadMWh: round(pvToLoadMWh, 10),
-        bessChargeMWh: round(bessChargeMWh + gridToBessMWh, 10),
-        bessDischargeMWh: round(bessDischargeMWh, 10),
-        gridImportMWh: round(gridImportMWh, 10),
-        wheelingMWh: round(wheelingMWh, 10),
-        rampEvent,
-        alarmCount: minuteAlarmCount,
-        energyBalanceError,
-        energyBalanceOk: !hasBalanceError,
-      });
+    if ((emsMode === "A" || supportMode === "D") && tariff.label !== "Pointe" && remainingPvMWh > 0) {
+      pvToBessMWh = Math.min(
+        remainingPvMWh,
+        BESS_POWER_LIMIT_MW,
+        Math.max(0, (BESS_CAPACITY_MWH - bessEnergyMWh) / CHARGE_EFFICIENCY),
+      );
+      remainingPvMWh -= pvToBessMWh;
+      bessEnergyMWh += pvToBessMWh * CHARGE_EFFICIENCY;
     }
 
-    const hourStates = minuteStates.slice(summaryStartIndex);
+    if (emsMode === "B" && remainingLoadMWh > 0) {
+      bessDischargeMWh = Math.min(
+        remainingLoadMWh,
+        BESS_POWER_LIMIT_MW,
+        bessEnergyMWh * DISCHARGE_EFFICIENCY,
+      );
+      remainingLoadMWh -= bessDischargeMWh;
+      bessEnergyMWh -= bessDischargeMWh / DISCHARGE_EFFICIENCY;
+    }
+
+    if (emsMode === "C" && allowNightGridCharging && tariff.label === "Creuses" && bessEnergyMWh < targetSocMWh) {
+      gridToBessMWh = Math.min(
+        BESS_POWER_LIMIT_MW,
+        Math.max(0, (targetSocMWh - bessEnergyMWh) / CHARGE_EFFICIENCY),
+      );
+      bessEnergyMWh += gridToBessMWh * CHARGE_EFFICIENCY;
+    }
+
+    wheelingMWh = Math.max(0, remainingPvMWh);
+    remainingPvMWh = 0;
+    gridToLoadMWh = Math.max(0, remainingLoadMWh);
+    bessEnergyMWh = clamp(bessEnergyMWh, 0, BESS_CAPACITY_MWH);
+    const socEndPercent = toSocPercent(bessEnergyMWh);
+    const bessChargeMWh = pvToBessMWh + gridToBessMWh;
+    const gridImportMWh = gridToLoadMWh + gridToBessMWh;
+    const leftBalance = pvMWh + bessDischargeMWh + gridImportMWh;
+    const rightBalance = loadMWh + bessChargeMWh + wheelingMWh;
+    const energyBalanceError = round(leftBalance - rightBalance, 10);
+    const loadBalanceError = round(loadMWh - (pvToLoadMWh + bessDischargeMWh + gridToLoadMWh), 10);
+    const hasBalanceError = Math.abs(energyBalanceError) > BALANCE_TOLERANCE_MWH || Math.abs(loadBalanceError) > BALANCE_TOLERANCE_MWH;
+    const hourAlarmCount = Number(rampEvent) + Number(hasBalanceError) + Number(socEndPercent >= 99.999);
+    alarmCount += hourAlarmCount;
+    if (hasBalanceError) energyBalanceErrorCount += 1;
+
+    const costDh = gridImportMWh * 1000 * tariff.rateDhPerKWh - wheelingMWh * 1000 * WHEELING_VALUE_DH_PER_KWH;
+    const baselineCostDh = loadMWh * 1000 * tariff.rateDhPerKWh;
+    totalCostWithEmsDh += costDh;
+    baselineCostWithoutEmsDh += baselineCostDh;
+    cumulativeGainDh += baselineCostDh - costDh;
+    totalPvProductionMWh += pvMWh;
+    totalOcpConsumptionMWh += loadMWh;
+    totalGridImportMWh += gridImportMWh;
+    totalBessChargeMWh += bessChargeMWh;
+    totalBessDischargeMWh += bessDischargeMWh;
+    totalWheelingMWh += wheelingMWh;
+
+    const state: ExcelHourScadaState = {
+      hourIndex,
+      minute: hourIndex,
+      timestamp: record.timestamp,
+      timeLabel: formatTimeLabel(record.date),
+      excelRowIndex: record.rowIndex,
+      hourOfDay: hour,
+      dayNumber: Math.floor(hourIndex / 24) + 1,
+      pvMW: round(record.productionMWh, 6),
+      loadMW: round(record.consumptionMWh, 6),
+      bessPowerMW: round(bessChargeMWh - bessDischargeMWh, 6),
+      socPercent: round(socEndPercent, 6),
+      socMWh: round(bessEnergyMWh, 6),
+      gridImportMW: round(gridImportMWh, 6),
+      wheelingMW: round(wheelingMWh, 6),
+      tariff: tariff.label,
+      tariffDhPerKWh: tariff.rateDhPerKWh,
+      emsMode,
+      supportMode,
+      command: getExcelCommand({ bessChargeMWh, bessDischargeMWh, gridToBessMWh, wheelingMWh, gridToLoadMWh }),
+      netCostDhPerHour: round(costDh, 6),
+      costDh: round(costDh, 6),
+      baselineCostDh: round(baselineCostDh, 6),
+      cumulativeBaselineCostDh: round(baselineCostWithoutEmsDh, 6),
+      cumulativeEmsCostDh: round(totalCostWithEmsDh, 6),
+      cumulativeGainDh: round(cumulativeGainDh, 6),
+      pvToLoadMW: round(pvToLoadMWh, 6),
+      pvToBessMW: round(pvToBessMWh, 6),
+      pvToWheelingMW: round(wheelingMWh, 6),
+      bessToLoadMW: round(bessDischargeMWh, 6),
+      gridToLoadMW: round(gridToLoadMWh, 6),
+      gridToBessMW: round(gridToBessMWh, 6),
+      pvMWh: round(pvMWh, 10),
+      loadMWh: round(loadMWh, 10),
+      pvToLoadMWh: round(pvToLoadMWh, 10),
+      bessChargeMWh: round(bessChargeMWh, 10),
+      bessDischargeMWh: round(bessDischargeMWh, 10),
+      gridImportMWh: round(gridImportMWh, 10),
+      wheelingMWh: round(wheelingMWh, 10),
+      gridToLoadMWh: round(gridToLoadMWh, 10),
+      gridToBessMWh: round(gridToBessMWh, 10),
+      pvToBessMWh: round(pvToBessMWh, 10),
+      bessPowerMWh: round(bessChargeMWh - bessDischargeMWh, 10),
+      bessEnergyStartMWh: round(bessEnergyStartMWh, 10),
+      bessEnergyEndMWh: round(bessEnergyMWh, 10),
+      socStartPercent: round(socStartPercent, 6),
+      socEndPercent: round(socEndPercent, 6),
+      rampEvent,
+      alarmCount: hourAlarmCount,
+      energyBalanceError: hasBalanceError ? round(energyBalanceError + loadBalanceError, 10) : 0,
+      energyBalanceOk: !hasBalanceError,
+    };
+    hourStates.push(state);
     hourlySummaries.push({
       timestamp: record.timestamp,
-      pvMWh: round(sum(hourStates, "pvMWh"), 6),
-      loadMWh: round(sum(hourStates, "loadMWh"), 6),
-      gridImportMWh: round(sum(hourStates, "gridImportMWh"), 6),
-      bessChargeMWh: round(sum(hourStates, "bessChargeMWh"), 6),
-      bessDischargeMWh: round(sum(hourStates, "bessDischargeMWh"), 6),
-      wheelingMWh: round(sum(hourStates, "wheelingMWh"), 6),
+      pvMWh: state.pvMWh,
+      loadMWh: state.loadMWh,
+      gridImportMWh: state.gridImportMWh,
+      bessChargeMWh: state.bessChargeMWh,
+      bessDischargeMWh: state.bessDischargeMWh,
+      wheelingMWh: state.wheelingMWh,
       socStartPercent: round(socStartPercent, 6),
-      socEndPercent: round(hourStates[hourStates.length - 1].socPercent, 6),
+      socEndPercent: state.socEndPercent,
       tariff: tariff.label,
       emsMode,
-      hourlyCostDh: round(sum(hourStates, "costDh"), 6),
-      baselineCostDh: round(sum(hourStates, "baselineCostDh"), 6),
-      hourlyGainDh: round(sum(hourStates, "baselineCostDh") - sum(hourStates, "costDh"), 6),
+      hourlyCostDh: state.costDh,
+      baselineCostDh: state.baselineCostDh,
+      hourlyGainDh: round(state.baselineCostDh - state.costDh, 6),
     });
   });
 
   return {
     sourceName,
     hourlyRecords,
-    minuteStates,
+    hourStates,
+    minuteStates: hourStates,
     hourlySummaries,
-    completed: minuteStates.length === EXCEL_SCADA_EXPECTED_MINUTES,
+    completed: hourStates.length === EXCEL_SCADA_EXPECTED_HOURS,
     kpis: {
       totalPvProductionMWh: round(totalPvProductionMWh, 6),
       totalOcpConsumptionMWh: round(totalOcpConsumptionMWh, 6),
@@ -386,78 +406,102 @@ export function simulateExcelScadaFullYear(
   };
 }
 
-export function getExcelMinutePointer(hourlyRecords: ExcelHourlyRecord[], currentMinuteIndex: number): ExcelMinutePointer {
-  const totalMinutes = hourlyRecords.length * EXCEL_SCADA_MINUTES_PER_HOUR;
-  const boundedMinuteIndex = clamp(Math.floor(currentMinuteIndex), 0, Math.max(0, totalMinutes - 1));
-  const hourIndex = Math.floor(boundedMinuteIndex / EXCEL_SCADA_MINUTES_PER_HOUR);
-  const minuteInsideHour = boundedMinuteIndex % EXCEL_SCADA_MINUTES_PER_HOUR;
+export function getExcelHourPointer(hourlyRecords: ExcelHourlyRecord[], currentHourIndex: number): ExcelHourPointer {
+  const totalHours = hourlyRecords.length;
+  const boundedHourIndex = clamp(Math.floor(currentHourIndex), 0, Math.max(0, totalHours - 1));
+  const hourIndex = boundedHourIndex;
   const hourRecord = hourlyRecords[hourIndex];
   if (!hourRecord) {
-    throw new Error(`Invalid minute index: ${currentMinuteIndex}`);
+    throw new Error(`Invalid hour index: ${currentHourIndex}`);
   }
 
-  const timestamp = new Date(hourRecord.date.getTime() + minuteInsideHour * 60_000);
   return {
-    currentMinuteIndex: boundedMinuteIndex,
+    currentHourIndex: boundedHourIndex,
     hourIndex,
-    minuteInsideHour,
-    totalMinutes,
+    hourOfDay: hourRecord.date.getUTCHours(),
+    totalHours,
     dayNumber: Math.floor(hourIndex / 24) + 1,
-    progressPercent: totalMinutes > 0 ? ((boundedMinuteIndex + 1) / totalMinutes) * 100 : 0,
-    timestamp: formatTimestamp(timestamp),
-    cursorHourPosition: hourIndex % 24 + minuteInsideHour / EXCEL_SCADA_MINUTES_PER_HOUR,
+    progressPercent: totalHours > 0 ? ((boundedHourIndex + 1) / totalHours) * 100 : 0,
+    timestamp: hourRecord.timestamp,
+    cursorHourPosition: hourRecord.date.getUTCHours(),
   };
 }
 
-export function getChartCursorHourPosition(currentMinuteIndex: number): number {
-  const boundedMinuteIndex = clamp(Math.floor(currentMinuteIndex), 0, Math.max(0, EXCEL_SCADA_EXPECTED_MINUTES - 1));
-  const minuteOfDay = boundedMinuteIndex % (24 * EXCEL_SCADA_MINUTES_PER_HOUR);
-  return Math.floor(minuteOfDay / EXCEL_SCADA_MINUTES_PER_HOUR) + (minuteOfDay % EXCEL_SCADA_MINUTES_PER_HOUR) / EXCEL_SCADA_MINUTES_PER_HOUR;
+export function getChartCursorHourPosition(currentHourIndex: number): number {
+  const boundedHourIndex = clamp(Math.floor(currentHourIndex), 0, Math.max(0, EXCEL_SCADA_EXPECTED_HOURS - 1));
+  return boundedHourIndex % 24;
 }
 
-export function exportExcelMinuteLogCsv(states: ExcelMinuteScadaState[]): string {
+export function exportExcelHourlyLogCsv(states: ExcelHourScadaState[]): string {
   return toCsv([
     [
       "timestamp",
       "excel_row_index",
-      "minute_index",
-      "pv_mw",
-      "load_mw",
+      "pv_mwh",
+      "load_mwh",
+      "pv_to_load_mwh",
+      "pv_to_bess_mwh",
+      "bess_to_load_mwh",
+      "grid_to_load_mwh",
+      "grid_to_bess_mwh",
+      "wheeling_mwh",
       "bess_power_mw",
-      "bess_soc_percent",
-      "bess_energy_mwh",
-      "grid_import_mw",
-      "wheeling_mw",
+      "bess_soc_start_percent",
+      "bess_soc_end_percent",
       "tariff",
       "tariff_dh_kwh",
       "ems_mode",
       "active_command",
       "cost_dh",
+      "baseline_cost_dh",
+      "gain_dh",
       "cumulative_gain_dh",
-      "alarm_count",
-      "energy_balance_error",
+      "energy_balance_ok",
     ],
     ...states.map((state) => [
       state.timestamp,
       state.excelRowIndex,
-      state.minute,
-      state.pvMW,
-      state.loadMW,
+      state.pvMWh,
+      state.loadMWh,
+      state.pvToLoadMWh,
+      state.pvToBessMWh,
+      state.bessDischargeMWh,
+      state.gridToLoadMWh,
+      state.gridToBessMWh,
+      state.wheelingMWh,
       state.bessPowerMW,
-      state.socPercent,
-      state.socMWh,
-      state.gridImportMW,
-      state.wheelingMW,
+      state.socStartPercent,
+      state.socEndPercent,
       state.tariff,
       state.tariffDhPerKWh,
       state.emsMode,
       state.command,
       state.costDh,
+      state.baselineCostDh,
+      state.baselineCostDh - state.costDh,
       state.cumulativeGainDh,
-      state.alarmCount,
-      state.energyBalanceError,
+      state.energyBalanceOk ? "OK" : "ERROR",
     ]),
   ]);
+}
+
+export const exportExcelMinuteLogCsv = exportExcelHourlyLogCsv;
+
+export function buildExcelHourlyChartSeries(history: ExcelHourScadaState[]): Record<string, number[]> {
+  return {
+    pvToLoad: history.map((state) => state.pvToLoadMWh),
+    bessToLoad: history.map((state) => state.bessDischargeMWh),
+    gridToLoad: history.map((state) => state.gridToLoadMWh),
+    bessPower: history.map((state) => state.bessPowerMW),
+    pvToBess: history.map((state) => state.pvToBessMWh),
+    pvToWheeling: history.map((state) => state.wheelingMWh),
+    gridToBess: history.map((state) => state.gridToBessMWh),
+    gridImport: history.map((state) => state.gridImportMWh),
+    socEnd: history.map((state) => state.socEndPercent),
+    baselineCost: history.map((state) => state.baselineCostDh),
+    emsCost: history.map((state) => state.costDh),
+    cumulativeGain: history.map((state) => state.cumulativeGainDh),
+  };
 }
 
 export function exportExcelHourlySummaryCsv(summaries: ExcelHourlySummary[]): string {
@@ -502,9 +546,9 @@ export function exportExcelSummaryJson(result: ExcelScadaSimulationResult): stri
     mode: "EXCEL FULL-YEAR SCADA TEST",
     sourceName: result.sourceName,
     hourCount: result.hourlyRecords.length,
-    minuteCount: result.minuteStates.length,
-    firstTimestamp: result.minuteStates[0]?.timestamp,
-    lastTimestamp: result.minuteStates[result.minuteStates.length - 1]?.timestamp,
+    stepCount: result.hourStates.length,
+    firstTimestamp: result.hourStates[0]?.timestamp,
+    lastTimestamp: result.hourStates[result.hourStates.length - 1]?.timestamp,
     completed: result.completed,
     kpis: result.kpis,
     hourlySummaries: result.hourlySummaries,
@@ -603,13 +647,6 @@ function getExcelCommand(flows: {
   if (flows.wheelingMWh > 1e-9) return "WHEELING_EXPORT";
   if (flows.gridToLoadMWh > 1e-9) return "GRID_TO_LOAD";
   return "STANDBY";
-}
-
-function sum(rows: ExcelMinuteScadaState[], key: keyof ExcelMinuteScadaState): number {
-  return rows.reduce((total, row) => {
-    const value = row[key];
-    return total + (typeof value === "number" ? value : 0);
-  }, 0);
 }
 
 function toCsv(rows: Array<Array<string | number>>): string {

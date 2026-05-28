@@ -10,13 +10,14 @@ import {
 } from "../core/services/scadaSimulationService.ts";
 import {
   EXCEL_SCADA_EXPECTED_HOURS,
-  EXCEL_SCADA_EXPECTED_MINUTES,
+  EXCEL_SCADA_EXPECTED_STEPS,
   EXCEL_SCADA_SHEET_NAME,
+  buildExcelHourlyChartSeries,
   exportExcelHourlySummaryCsv,
-  exportExcelMinuteLogCsv,
+  exportExcelHourlyLogCsv,
   exportExcelSummaryJson,
   getChartCursorHourPosition,
-  getExcelMinutePointer,
+  getExcelHourPointer,
   normalizeExcelRow,
   parseExcelScadaWorkbook,
   simulateExcelScadaFullYear,
@@ -99,31 +100,37 @@ const normalizedVariantRow = normalizeExcelRow({
 assert(normalizedVariantRow.production_mwh === "0" && normalizedVariantRow.consumption_mwh === "15", "Excel row normalization should support common column variants.");
 
 const excelResult = simulateExcelScadaFullYear(excelRecords, { allowNightGridCharging: false, initialSocPercent: 0 });
-assert(excelResult.minuteStates.length === EXCEL_SCADA_EXPECTED_MINUTES, "Hourly Excel data should expand to 525600 minute records.");
-assert(excelResult.minuteStates[0].socPercent === 0, "Initial SoC should be 0%.");
-assert(excelResult.minuteStates[0].socMWh === 0, "First timestamp should start with BESS discharged.");
-assert(excelResult.minuteStates[1].timestamp === "2025-01-01T00:01:00", "Next minute should advance timestamp by exactly 1 minute.");
-assert(excelResult.minuteStates[61].minuteIndexInHour === 1, "At 01:01, minuteInsideHour should be 1.");
-assert(excelResult.minuteStates[119].timestamp === "2025-01-01T01:59:00", "01:59 should map to minute 119.");
-assert(excelResult.minuteStates[120].timestamp === "2025-01-01T02:00:00", "Next minute after 01:59 should move to 02:00.");
-assert(getExcelMinutePointer(excelRecords, 61).hourIndex === 1, "currentMinuteIndex should map correctly to Excel hour row.");
-assert(Math.abs(excelResult.minuteStates[0].loadMWh - 0.25) < 1e-9, "15 MW load should equal 0.25 MWh per minute.");
-assert(excelResult.minuteStates.every((state) => state.socPercent >= 0 && state.socPercent <= 100), "Excel SoC should remain between 0% and 100%.");
-assert(excelResult.minuteStates.every((state) => state.tariff !== "Pointe" || state.bessChargeMWh <= 1e-9), "Excel BESS should never charge during Pointe.");
-assert(excelResult.minuteStates.every((state) => state.timestamp.slice(11, 13) !== "22" || state.gridToBessMW <= 1e-9), "Excel BESS should not charge from grid at 22h Pleines.");
-assert(excelResult.minuteStates.some((state) => state.emsMode === "A" && state.pvToBessMW > 0), "Excel BESS should charge from PV surplus during Mode A.");
-assert(excelResult.minuteStates.some((state) => state.emsMode === "B" && state.bessToLoadMW > 0), "Excel BESS should discharge during Mode B when SoC is available.");
-assert(excelResult.minuteStates.every((state) => Math.abs(state.energyBalanceError) <= 1e-8), "Excel energy balance should be valid for all minutes.");
-assert(excelResult.minuteStates.every((state) => state.energyBalanceOk), "Excel chart/log balance flag should be OK for all synthetic minutes.");
-assert(excelResult.minuteStates.every((state) => Math.abs((state.pvToLoadMW + state.bessToLoadMW + state.gridToLoadMW) - state.loadMW) < 1e-6), "Excel OCP load supply mix should sum to load.");
-assert(excelResult.minuteStates.every((state) => Math.abs((state.pvToLoadMW + state.pvToBessMW + state.pvToWheelingMW) - state.pvMW) < 1e-6), "Excel PV allocation should sum to PV production.");
-assert(excelResult.minuteStates.every((state) => Math.abs((state.gridToLoadMW + state.gridToBessMW) - state.gridImportMW) < 1e-6), "Excel grid import breakdown should sum correctly.");
-assert(excelResult.minuteStates.some((state) => state.bessPowerMW > 0), "Excel chart data should include positive BESS charging.");
-assert(excelResult.minuteStates.some((state) => state.bessPowerMW < 0), "Excel chart data should include negative BESS discharging.");
-assert(excelResult.minuteStates[1].cumulativeGainDh !== excelResult.minuteStates[0].cumulativeGainDh || excelResult.minuteStates[1].cumulativeEmsCostDh > 0, "Economic cumulative data should update after each minute.");
-assert(getChartCursorHourPosition(60) === 1, "Chart cursor should map 01:00 to x = 1.00.");
-assert(Math.abs(getChartCursorHourPosition(90) - 1.5) < 1e-9, "Chart cursor should map 01:30 to x = 1.50.");
-assert(excelResult.minuteStates.every((state) => [
+assert(excelResult.hourStates.length === EXCEL_SCADA_EXPECTED_STEPS, "Excel simulation should produce 8760 hourly records.");
+assert(excelResult.hourStates[0].socPercent === 0, "Initial SoC should be 0%.");
+assert(excelResult.hourStates[0].socMWh === 0, "First timestamp should start with BESS discharged.");
+assert(excelResult.hourStates[1].timestamp === "2025-01-01T01:00:00", "Next Hour should advance timestamp by exactly 1 hour.");
+assert(excelResult.hourStates[1].hourIndex === 1, "At 01:00, currentHourIndex should be 1.");
+assert(excelResult.hourStates[23].timestamp === "2025-01-01T23:00:00", "23:00 should map to hour 23.");
+assert(excelResult.hourStates[24].timestamp === "2025-01-02T00:00:00", "Next hour after 23:00 should move to next day 00:00.");
+assert(getExcelHourPointer(excelRecords, 1).hourIndex === 1, "currentHourIndex should map correctly to Excel hour row.");
+assert(Math.abs(excelResult.hourStates[0].loadMWh - 15) < 1e-9, "15 MW load should equal 15 MWh per hour.");
+assert(excelResult.hourStates.every((state) => state.socPercent >= 0 && state.socPercent <= 100), "Excel SoC should remain between 0% and 100%.");
+assert(excelResult.hourStates.every((state) => state.tariff !== "Pointe" || state.bessChargeMWh <= 1e-9), "Excel BESS should never charge during Pointe.");
+assert(excelResult.hourStates.every((state) => state.timestamp.slice(11, 13) !== "22" || state.gridToBessMW <= 1e-9), "Excel BESS should not charge from grid at 22h Pleines.");
+assert(excelResult.hourStates.some((state) => state.emsMode === "A" && state.pvToBessMW > 0), "Excel BESS should charge from PV surplus during Mode A.");
+assert(excelResult.hourStates.some((state) => state.emsMode === "B" && state.bessToLoadMW > 0), "Excel BESS should discharge during Mode B when SoC is available.");
+assert(excelResult.hourStates.every((state) => Math.abs(state.energyBalanceError) <= 1e-8), "Excel energy balance should be valid for all hours.");
+assert(excelResult.hourStates.every((state) => state.energyBalanceOk), "Excel chart/log balance flag should be OK for all synthetic hours.");
+assert(excelResult.hourStates.every((state) => Math.abs((state.pvToLoadMW + state.bessToLoadMW + state.gridToLoadMW) - state.loadMW) < 1e-6), "Excel OCP load supply mix should sum to load.");
+assert(excelResult.hourStates.every((state) => Math.abs((state.pvToLoadMW + state.pvToBessMW + state.pvToWheelingMW) - state.pvMW) < 1e-6), "Excel PV allocation should sum to PV production.");
+assert(excelResult.hourStates.every((state) => Math.abs((state.gridToLoadMW + state.gridToBessMW) - state.gridImportMW) < 1e-6), "Excel grid import breakdown should sum correctly.");
+assert(excelResult.hourStates.every((state) => Math.abs((state.pvMWh + state.bessDischargeMWh + state.gridImportMWh) - (state.loadMWh + state.bessChargeMWh + state.wheelingMWh)) < 1e-6), "Excel full hourly energy balance should be valid.");
+assert(excelResult.hourStates.some((state) => state.bessPowerMW > 0), "Excel chart data should include positive BESS charging.");
+assert(excelResult.hourStates.some((state) => state.bessPowerMW < 0), "Excel chart data should include negative BESS discharging.");
+assert(excelResult.hourStates[1].cumulativeGainDh !== excelResult.hourStates[0].cumulativeGainDh || excelResult.hourStates[1].cumulativeEmsCostDh > 0, "Economic cumulative data should update after each hour.");
+const oneHourSeries = buildExcelHourlyChartSeries(excelResult.hourStates.slice(0, 1));
+const twoHourSeries = buildExcelHourlyChartSeries(excelResult.hourStates.slice(0, 2));
+assert(twoHourSeries.pvToLoad.length === oneHourSeries.pvToLoad.length + 1, "Charts should get one extra point after Next Hour.");
+assert(new Set(buildExcelHourlyChartSeries(excelResult.hourStates.slice(0, 24)).gridToLoad).size > 1, "Chart datasets should not be constant placeholders.");
+assert(getChartCursorHourPosition(1) === 1, "Chart cursor should map 01:00 to x = 1.");
+assert(getChartCursorHourPosition(23) === 23, "Chart cursor should map 23:00 to x = 23.");
+assert(excelResult.hourStates.slice(0, 24).length <= 24, "Current day chart should have max 24 hourly points.");
+assert(excelResult.hourStates.every((state) => [
   state.pvToLoadMW,
   state.bessToLoadMW,
   state.gridToLoadMW,
@@ -134,12 +141,14 @@ assert(excelResult.minuteStates.every((state) => [
   state.cumulativeBaselineCostDh,
   state.cumulativeEmsCostDh,
   state.cumulativeGainDh,
+  state.bessEnergyStartMWh,
+  state.bessEnergyEndMWh,
 ].every(Number.isFinite)), "Chart datasets should not contain NaN or undefined values.");
 assert(excelResult.completed, "Full Excel simulation should reach completion.");
-assert(exportExcelMinuteLogCsv(excelResult.minuteStates).split("\n").length === EXCEL_SCADA_EXPECTED_MINUTES + 1, "Minute CSV should export every minute plus header.");
+assert(exportExcelHourlyLogCsv(excelResult.hourStates).split("\n").length === EXCEL_SCADA_EXPECTED_STEPS + 1, "Hourly CSV should export every hour plus header.");
 assert(exportExcelHourlySummaryCsv(excelResult.hourlySummaries).split("\n").length === EXCEL_SCADA_EXPECTED_HOURS + 1, "Hourly CSV should export every hour plus header.");
 const excelJson = JSON.parse(exportExcelSummaryJson(excelResult));
-assert(excelJson.minuteCount === EXCEL_SCADA_EXPECTED_MINUTES, "Full-year JSON should include minute count.");
+assert(excelJson.stepCount === EXCEL_SCADA_EXPECTED_STEPS, "Full-year JSON should include hourly step count.");
 assert(excelJson.hourlySummaries.length === EXCEL_SCADA_EXPECTED_HOURS, "Full-year JSON should include hourly data.");
 
 console.log("SCADA supervision tests passed.");
