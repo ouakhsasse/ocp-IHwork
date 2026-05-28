@@ -38,6 +38,7 @@ export default defineConfig(async () => ({
         fullAnalysis: resolve(__dirname, "Full Analysis.html"),
         batteryParameters: resolve(__dirname, "Battery Parameters.html"),
         ocpEmsSimulator: resolve(__dirname, "OCP EMS Simulator.html"),
+        scadaSupervision: resolve(__dirname, "scada_supervision.html"),
         competitives: resolve(__dirname, "COMPETITIVES.html"),
       },
     },

@@ -11,6 +11,7 @@
     "test:annual": "node --experimental-strip-types src/tests/annual_simulation_test.ts",
     "test:study": "node --experimental-strip-types src/tests/project_study_test.ts",
     "test:real-data": "node --experimental-strip-types src/tests/real_data_import_test.ts",
+    "test:scada": "node --experimental-strip-types src/tests/scada_supervision_test.ts",
     "study:ocp-csv": "node --experimental-strip-types src/scripts/run_ocp_csv_study.ts",
     "preview": "vite preview",
     "tauri": "tauri"
