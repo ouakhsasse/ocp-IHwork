@@ -13,6 +13,7 @@ dist-ssr
 *.local
 *.xlsx
 *.xls
+data base 2025(1)mod.xlsx
 
 # Editor directories and files
 .vscode/
