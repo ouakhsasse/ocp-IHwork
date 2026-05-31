@@ -6,6 +6,8 @@
     <title>OCP Benguerir PV-BESS SCADA</title>
     <link rel="icon" href="data:,">
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <style>
         :root {
             color-scheme: dark;
@@ -552,7 +554,7 @@
         }
         .tariff-bar {
             display: grid;
-            grid-template-columns: 7fr 10fr 5fr 1fr 1fr;
+            grid-template-columns: 8fr 10fr 6fr 1fr;
             border: 1px solid #243a52;
             border-radius: 4px;
             overflow: hidden;
@@ -619,7 +621,7 @@
         <header class="topbar">
             <div>
                 <div class="title">OCP Benguerir PV-BESS SCADA</div>
-                <div class="subline"><span id="simDateTime">2026-06-21 00:00</span> Africa/Casablanca | 67 MWc PV | 25 MW / 125 MWh BESS | OCP load 15 MW</div>
+                <div class="subline"><span id="simDateTime">2025-01-01 00:00</span> Morocco/Benguerir | 67 MWc PV | 25 MW / 125 MWh BESS | OCP load 15 MW</div>
             </div>
             <div class="status-row">
                 <span id="emsStatusBadge" class="badge ready">EMS READY</span>
@@ -783,9 +785,8 @@
                                 <div class="tariff-bar">
                                     <div class="tariff-segment creuses">Creuses<br>23-07</div>
                                     <div class="tariff-segment pleines">Pleines<br>07-17</div>
-                                    <div class="tariff-segment pointe">Pointe<br>17-22</div>
-                                    <div class="tariff-segment pleines">22-23</div>
-                                    <div class="tariff-segment creuses">23</div>
+                                    <div class="tariff-segment pointe">Pointe<br>17-23</div>
+                                    <div class="tariff-segment creuses">23-24</div>
                                 </div>
                                 <div id="timelineCursor" class="timeline-cursor" style="--cursor: 0%;"></div>
                             </div>
@@ -839,10 +840,25 @@
                         <div id="activeCommand" class="command-box">GRID_TO_LOAD</div>
                     </div>
                     <div class="field">
-                        <label>Weather / PVGIS data</label>
+                        <label>PV Production Forecast — Météo Benguerir</label>
                         <div class="command-box" style="color:#c7d6e6;font-size:11px;">
-                            <div id="weatherSummary">Loading forecast...</div>
-                            <div id="sunSummary">Sunrise --:-- | Sunset --:--</div>
+                            <div id="weatherSummary" style="margin-bottom:4px;">Cliquez sur Fetch pour charger la météo</div>
+                            <div id="sunSummary" style="color:#8ca4bb;margin-bottom:6px;"></div>
+                            <button id="fetchWeatherButton" class="scada-button primary" type="button" style="width:100%;margin-bottom:6px;">🌤 Fetch 7-day weather forecast</button>
+                            <div id="weatherForecastTable" style="display:none;">
+                                <div style="color:#b9cbe0;font-size:10px;font-weight:900;letter-spacing:0.06em;margin-bottom:4px;">7-DAY PV PREDICTION — Benguerir 32.23°N 7.95°W</div>
+                                <table style="width:100%;border-collapse:collapse;font-size:10px;" id="forecastTableBody">
+                                    <thead><tr style="color:#8ca4bb;">
+                                        <th style="text-align:left;padding:2px 4px;">Date</th>
+                                        <th style="padding:2px 4px;">☁ Cloud%</th>
+                                        <th style="padding:2px 4px;">☀ Rad MJ</th>
+                                        <th style="padding:2px 4px;">🌡 T°C</th>
+                                        <th style="padding:2px 4px;color:#f59e0b;">⚡ PV MWh</th>
+                                    </tr></thead>
+                                    <tbody id="forecastRows"></tbody>
+                                </table>
+                                <div id="forecastNote" style="color:#8ca4bb;font-size:10px;margin-top:4px;"></div>
+                            </div>
                         </div>
                     </div>
                     <div class="field">
@@ -855,6 +871,861 @@
 
     </div>
 
-    <script type="module" src="/src/scadaSupervision.ts"></script>
+    
+    </div>
+
+
+<script>
+// ============================================================
+// OCP BENGUERIR PV-BESS SCADA — STANDALONE EMS ENGINE v2
+// Fonctionne immédiatement (profil demo) + Excel réel 2025
+// ============================================================
+
+// --- CONSTANTES ---
+const BESS_MAX_MW        = 25;
+const BESS_CAPACITY_MWH  = 125;
+const SOC_MIN            = 0;
+const SOC_MAX            = 100;
+const LOAD_MW            = 15;
+const WHEELING_RATE      = 0.7131; // DH/kWh
+
+const TARIFF_SCHEDULE = [
+  [0,  7,  "Creuses", 0.5264],
+  [7,  17, "Pleines", 0.9017],
+  [17, 23, "Pointe",  1.2019],
+  [23, 24, "Creuses", 0.5264],
+];
+
+function getTariff(h) {
+  for (const [s, e, name, rate] of TARIFF_SCHEDULE)
+    if (h >= s && h < e) return { name, rate };
+  return { name: "Creuses", rate: 0.5264 };
+}
+function getMode(h) {
+  if (h >= 7  && h < 17) return "A";
+  if (h >= 17 && h < 23) return "B";
+  return "C";
+}
+
+// --- PROFIL PV DEMO (24h typique Benguerir, MWh/h) ---
+const PV_DEMO_24H = [
+  0,0,0,0,0,0,0,
+  2.1, 8.4, 18.2, 28.5, 36.7,
+  41.2, 43.0, 41.8, 37.3, 29.1,
+  18.6, 9.2, 3.1, 0.5, 0,0,0
+];
+
+function generateDemoYear() {
+  const records = [];
+  const base = new Date('2025-01-01T00:00:00');
+  for (let h = 0; h < 8760; h++) {
+    const d = new Date(base.getTime() + h * 3600000);
+    const hod = d.getHours();
+    const doy = Math.floor(h / 24);
+    // Seasonal factor: peak in summer (day 172), low in winter
+    const season = 0.6 + 0.4 * Math.sin((doy - 80) / 365 * 2 * Math.PI);
+    // Random daily variability ±15%
+    const noise = 0.85 + 0.30 * Math.random();
+    const pv = +(PV_DEMO_24H[hod] * season * noise).toFixed(3);
+    records.push({ timestamp: d, pvMWh: pv, loadMWh: LOAD_MW });
+  }
+  return records;
+}
+
+// Format date as local "YYYY-MM-DD HH:mm" — avoids UTC shift from toISOString()
+function fmtLocalTs(d) {
+  const Y  = d.getFullYear();
+  const M  = String(d.getMonth()+1).padStart(2,'0');
+  const D  = String(d.getDate()).padStart(2,'0');
+  const hh = String(d.getHours()).padStart(2,'0');
+  const mm = String(d.getMinutes()).padStart(2,'0');
+  return `${Y}-${M}-${D} ${hh}:${mm}`;
+}
+
+// --- SIMULATION EMS ---
+function simulateEms(records, nightCharge) {
+  const states = [];
+  let soc = 50;
+  let cumGain = 0, cumCost = 0, cumBase = 0;
+
+  for (let i = 0; i < records.length; i++) {
+    const rec   = records[i];
+    const hod   = rec.timestamp.getHours();
+    const day   = Math.floor(i / 24) + 1;
+    const pv    = rec.pvMWh;
+    const load  = rec.loadMWh || LOAD_MW;
+    const tariff = getTariff(hod);
+    const mode   = getMode(hod);
+
+    const maxChg = Math.min(BESS_MAX_MW, ((SOC_MAX - soc) / 100) * BESS_CAPACITY_MWH);
+    const maxDis = Math.min(BESS_MAX_MW, ((soc - SOC_MIN) / 100) * BESS_CAPACITY_MWH);
+
+    let pvLoad=0, pvBess=0, pvWheel=0;
+    let bessLoad=0, gridLoad=0, gridBess=0;
+    let bessChg=0, bessDis=0;
+    let cmd = "GRID_TO_LOAD";
+
+    if (mode === "A") {
+      pvLoad  = Math.min(pv, load);
+      const sur = pv - pvLoad;
+      if (sur > 0.001) {
+        pvBess  = Math.min(sur, maxChg);
+        pvWheel = Math.max(0, sur - pvBess);
+      }
+      gridLoad = Math.max(0, load - pvLoad);
+      bessChg  = pvBess;
+      if (pvBess > 0.001)   cmd = "PV_CHARGE_BESS";
+      else if (pvWheel > 0) cmd = "PV_TO_WHEELING";
+      else if (gridLoad > 0) cmd = "PV_GRID_TO_LOAD";
+      else cmd = "PV_TO_LOAD";
+
+    } else if (mode === "B") {
+      pvLoad  = Math.min(pv, load);
+      const rem = load - pvLoad;
+      bessLoad = Math.min(rem, maxDis);
+      gridLoad = Math.max(0, rem - bessLoad);
+      const sur = pv - pvLoad;
+      if (sur > 0.001) pvWheel = sur;
+      bessDis = bessLoad;
+      cmd = bessLoad > 0.001 ? "BESS_DISCHARGE_PEAK" : "PV_GRID_TO_LOAD";
+
+    } else { // Mode C — nuit
+      gridLoad = load;
+      if (nightCharge && tariff.name === "Creuses" && maxChg > 0.5) {
+        gridBess = Math.min(BESS_MAX_MW * 0.5, maxChg);
+        bessChg  = gridBess;
+        cmd = "GRID_CHARGE_BESS_NIGHT";
+      }
+    }
+
+    const socStart = soc;
+    soc = Math.max(SOC_MIN, Math.min(SOC_MAX,
+      soc + ((bessChg - bessDis) / BESS_CAPACITY_MWH) * 100));
+    const socEnd = soc;
+
+    const gridTotal = gridLoad + gridBess;
+    const wheelRev  = pvWheel * 1000 * WHEELING_RATE;
+    const cost      = gridTotal * 1000 * tariff.rate - wheelRev;
+    const base      = load * 1000 * tariff.rate;
+    const gain      = base - cost;
+    cumGain += gain; cumCost += cost; cumBase += base;
+
+    const bessPow   = bessChg - bessDis;
+    const balErr    = Math.abs((pvLoad + bessLoad + gridLoad) - load);
+
+    const ts = fmtLocalTs(rec.timestamp);
+    states.push({
+      minute: i, hourIndex: i, excelRowIndex: i,
+      timestamp: ts,
+      timeLabel: `${String(hod).padStart(2,'0')}:00`,
+      hourOfDay: hod, dayNumber: day,
+      pvMW: pv, pvMWh: pv,
+      loadMW: load, loadMWh: load,
+      pvToLoadMW: pvLoad, pvToLoadMWh: pvLoad,
+      pvToBessMW: pvBess, pvToBessMWh: pvBess,
+      pvToWheelingMW: pvWheel,
+      wheelingMW: pvWheel, wheelingMWh: pvWheel,
+      bessToLoadMW: bessLoad, bessDischargeMWh: bessDis,
+      bessChargeMWh: bessChg,
+      gridToLoadMW: gridLoad, gridToLoadMWh: gridLoad,
+      gridToBessMW: gridBess, gridToBessMWh: gridBess,
+      gridImportMW: gridTotal, gridImportMWh: gridTotal,
+      bessPowerMW: bessPow,
+      socPercent: socEnd, socStartPercent: socStart, socEndPercent: socEnd,
+      socMWh: (socEnd / 100) * BESS_CAPACITY_MWH,
+      tariff: tariff.name, tariffDhPerKWh: tariff.rate,
+      emsMode: mode, supportMode: null, command: cmd,
+      costDh: cost, baselineCostDh: base, netCostDhPerHour: cost,
+      cumulativeGainDh: cumGain,
+      cumulativeEmsCostDh: cumCost,
+      cumulativeBaselineCostDh: cumBase,
+      rampEvent: false,
+      energyBalanceOk: balErr < 0.01,
+      energyBalanceError: balErr,
+    });
+  }
+  return states;
+}
+
+// --- ÉTAT GLOBAL ---
+let hourStates    = [];
+let currentHour   = 0;
+let timerId       = null;
+let excelLoaded   = false;
+let nightCharge   = false;
+let activeLogFilter = "all";
+let chartWindowMode = "day";
+let visibleLog    = [];
+let lastLogged    = null;
+let activeCharts  = [];
+let chartWinStart = 0;
+
+// Init demo immediately
+hourStates = simulateEms(generateDemoYear(), false);
+
+// --- UI UTILS ---
+const el  = id => document.getElementById(id);
+const txt = (id, v) => { const e = el(id); if (e) e.textContent = String(v); };
+const htm = (id, v) => { const e = el(id); if (e) e.innerHTML = v; };
+const badge = (id, t, c) => { const e = el(id); if (!e) return; e.textContent = t; e.className = `badge ${c}`; };
+const fmt  = (v, d) => isFinite(v) ? Number(v).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d}) : 'N/A';
+const sgn  = (v, d) => (v > 0 ? '+' : '') + fmt(v, d);
+const esc  = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+// --- EXCEL PARSE ---
+async function loadExcel(file) {
+  if (!file) { txt('excelStatus','Sélectionnez le fichier Excel'); return; }
+  try {
+    txt('excelStatus', `Lecture de "${file.name}"...`);
+    const buf = await file.arrayBuffer();
+    const wb  = XLSX.read(new Uint8Array(buf), { type:'array', cellDates:true });
+    const ws  = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(ws, { header:1 });
+
+    // Find header row (contains "date")
+    let start = 0;
+    for (let i = 0; i < Math.min(5, rows.length); i++) {
+      if (rows[i]?.some(c => typeof c === 'string' && c.toLowerCase().includes('date'))) {
+        start = i + 1; break;
+      }
+    }
+
+    const records = [];
+    for (let i = start; i < rows.length; i++) {
+      const row = rows[i];
+      if (!row || row.length < 2) continue;
+      let d = row[0] instanceof Date ? new Date(row[0])
+            : typeof row[0] === 'number' ? new Date(Math.round((row[0]-25569)*86400000))
+            : new Date(row[0]);
+      if (isNaN(d)) continue;
+      d.setMinutes(0, 0, 0);  // normalize to whole hour — fixes ms bug
+      records.push({ timestamp: d, pvMWh: +row[1]||0, loadMWh: +row[2]||LOAD_MW });
+    }
+
+    if (records.length < 100) {
+      txt('excelStatus', `Erreur: seulement ${records.length} lignes lues`); return;
+    }
+
+    txt('excelStatus', `Simulation EMS en cours (${records.length} h)...`);
+    nightCharge = el('allowNightGridCharging')?.checked || false;
+    hourStates  = simulateEms(records, nightCharge);
+    excelLoaded = true;
+
+    txt('excelStatus', `✓ ${records.length} heures chargées — démarrage 01/01/2025`);
+    badge('pvgisStatus', 'EXCEL 2025 CHARGÉ', 'online');
+    badge('emsStatusBadge', 'EMS READY', 'ready');
+
+    // Reset and show hour 0
+    pauseSim(false);
+    currentHour = 0; chartWinStart = 0; lastLogged = null; visibleLog = [];
+    renderLog(); renderCharts(); renderHour(0); renderKpis();
+
+  } catch(err) {
+    console.error(err);
+    txt('excelStatus', 'Erreur: ' + (err.message || String(err)));
+    badge('emsStatusBadge','WARNING','warning');
+  }
+}
+
+// --- RENDER HOUR ---
+function renderHour(h) {
+  const s = hourStates[h];
+  if (!s) return;
+  txt('simDateTime',   s.timestamp);
+  txt('plantModeTag', `MODE ${s.emsMode}`);
+  txt('pvPower',       fmt(s.pvMW, 2));
+  txt('loadPower',     fmt(s.loadMW, 2));
+  txt('bessPower',     sgn(s.bessPowerMW, 2));
+  txt('socPercent',    fmt(s.socPercent, 1));
+  txt('gridImport',    fmt(s.gridImportMW, 2));
+  txt('wheelingExport',fmt(s.wheelingMW, 2));
+  txt('currentTariff', s.tariff);
+  txt('currentMode',   s.emsMode);
+  txt('netCost',       fmt(s.costDh, 0));
+  txt('dailyGain',     fmt(s.cumulativeGainDh, 0));
+  txt('activeCommand', s.command);
+  txt('nodePv',        `${fmt(s.pvMW,2)} MW`);
+  txt('nodeBess',      `${sgn(s.bessPowerMW,2)} MW`);
+  txt('nodeBessSoc',   `${fmt(s.socMWh,1)} MWh | ${fmt(s.socPercent,1)}%`);
+  txt('nodeGrid',      `${fmt(s.gridImportMW,2)} MW`);
+  txt('nodeWheeling',  `${fmt(s.wheelingMW,2)} MW`);
+  txt('labelPvLoad',   `${fmt(s.pvToLoadMW,2)} MW`);
+  txt('labelPvBess',   `${fmt(s.pvToBessMW,2)} MW`);
+  txt('labelWheel',    `${fmt(s.wheelingMW,2)} MW`);
+  txt('labelBessLoad', `${fmt(s.bessToLoadMW,2)} MW`);
+  txt('labelGridLoad', `${fmt(s.gridToLoadMW,2)} MW`);
+  txt('labelGridBess', `${fmt(s.gridToBessMW,2)} MW`);
+
+  const c = el('timelineCursor');
+  if (c) c.style.setProperty('--cursor', `${(s.hourOfDay/23)*100}%`);
+
+  flow('flowPvInv',   s.pvMW);
+  flow('flowInvLoad', s.pvToLoadMW);
+  flow('flowPvBess',  s.pvToBessMW);
+  flow('flowInvWheel',s.wheelingMW);
+  flow('flowBessLoad',s.bessToLoadMW);
+  flow('flowGridLoad',s.gridToLoadMW);
+  flow('flowGridBess',s.gridToBessMW);
+
+  updateOverlay(s);
+  renderAlarms(s);
+  renderProgress(s, h);
+  renderLiveState(s, h);
+  renderEnergyBox(s);
+  renderSummary(s, h);
+  renderInterpretation(s);
+  appendLog(s, h);
+  txt('chartCursorLabel', `Heure courante: ${s.timeLabel} | ${h+1}/${hourStates.length}`);
+  updateChartsLive();
+}
+
+function flow(id, v) {
+  const e = el(id); if (!e) return;
+  e.classList.toggle('active', v > 0.05);
+  e.style.strokeWidth = String(2 + Math.min(7, v/8));
+  e.style.animationDuration = `${Math.max(0.35, 1.4 - Math.min(1, v/35))}s`;
+}
+
+function updateOverlay(s) {
+  const ov = el('periodOverlay'); if (!ov) return;
+  ov.className = 'period-overlay';
+  if (s.tariff === 'Pointe') ov.classList.add('peak');
+  else if (s.emsMode === 'C' || s.pvMW <= 0.05) ov.classList.add('night');
+}
+
+function renderAlarms(s) {
+  const al = [
+    { n:'SoC bas (<5%)', sv:'WARNING',  ok: s.socPercent > 5 },
+    { n:'SoC haut (>98%)', sv:'INFO',    ok: s.socPercent < 98 },
+    { n:'Pointe tarifaire — décharge BESS', sv:'INFO', ok: s.tariff !== 'Pointe' },
+    { n:'Import réseau élevé >20 MW', sv:'CRITICAL', ok: s.gridImportMW < 20 },
+    { n:'ERREUR BILAN ÉNERGÉTIQUE', sv:'CRITICAL',   ok: s.energyBalanceOk },
+  ].filter(a => !a.ok);
+  const h = al.length
+    ? al.map(a=>`<div class="alarm ${a.sv==='CRITICAL'?'critical':a.sv==='WARNING'?'warning':''}">
+        <div class="alarm-head"><span>${esc(a.n)}</span><span>${a.sv}</span></div>
+        <div class="alarm-time">${esc(s.timestamp)}</div>
+        <button class="ack" type="button">ACK</button></div>`).join('')
+    : `<div class="alarm"><div class="alarm-head"><span>Conditions normales</span><span>INFO</span></div>
+       <div class="alarm-time">${esc(s.timestamp)}</div></div>`;
+  htm('alarmList', h); htm('activeAlarmList', h);
+  txt('alarmCount', `${al.length} ACTIVE`);
+  txt('alarmHistoryCount', `${al.length} ACTIVE`);
+}
+
+function renderInterpretation(s) {
+  let t = 'OCP alimenté par réseau ONEE — PV=0 et BESS en veille.';
+  if (!s.energyBalanceOk)          t = 'ERREUR BILAN: vérifiez les flux PV, BESS, grid, charge.';
+  else if (s.bessToLoadMW > 0.05 && s.tariff==='Pointe')
+    t = `BESS décharge à ${fmt(s.bessToLoadMW,1)} MW en Pointe — import ONEE réduit.`;
+  else if (s.pvToBessMW > 0.05)
+    t = `Surplus PV charge BESS à ${fmt(s.pvToBessMW,1)} MW après alimentation OCP.`;
+  else if (s.gridToBessMW > 0.05)
+    t = `Réseau ONEE charge BESS à ${fmt(s.gridToBessMW,1)} MW (Mode C nuit activé).`;
+  else if (s.wheelingMW > 0.05)
+    t = `BESS plein — surplus PV exporté wheeling à ${fmt(s.wheelingMW,1)} MW.`;
+  else if (s.pvToLoadMW > 0.05 && s.gridToLoadMW > 0.05)
+    t = `OCP alimenté PV ${fmt(s.pvToLoadMW,1)} MW + réseau ${fmt(s.gridToLoadMW,1)} MW.`;
+  else if (s.pvToLoadMW >= s.loadMW - 0.05)
+    t = 'Charge OCP entièrement couverte par PV cette heure.';
+  txt('energyInterpretation', t);
+}
+
+function renderProgress(s, h) {
+  const tot = hourStates.length;
+  const pct = ((h+1)/tot*100).toFixed(2);
+  txt('excelProgress', [
+    `Excel row ${h+1} / ${tot}`,
+    `Timestamp: ${s.timestamp}`,
+    `Jour ${s.dayNumber} / 365`,
+    `Progression: ${pct}%`,
+    h >= tot-1 ? '✓ SIMULATION ANNUELLE COMPLÈTE' : `Restant: ${tot-h-1} heures`,
+  ].join('\n'));
+}
+
+function renderLiveState(s, h) {
+  const tot = hourStates.length;
+  const bal = s.energyBalanceOk ? 'OK' : 'ERREUR';
+  htm('liveMinuteState', [
+    ['Heure courante', s.timestamp],
+    ['Excel row', `${h+1} / ${tot}`],
+    ['Heure du jour', `${String(s.hourOfDay).padStart(2,'0')}h`],
+    ['Jour', `${s.dayNumber} / 365`],
+    ['Progression', `${((h+1)/tot*100).toFixed(2)}%`],
+    ['Tarif', s.tariff],
+    ['Mode EMS', s.emsMode],
+    ['Commande', s.command],
+    ['Bilan', bal],
+  ].map(([l,v])=>`<span>${esc(l)}</span><span>${esc(v)}</span>`).join(''));
+}
+
+function renderEnergyBox(s) {
+  htm('energyThisMinute', [
+    ['Production PV', `${fmt(s.pvMWh,3)} MWh`],
+    ['Conso OCP',     `${fmt(s.loadMWh,3)} MWh`],
+    ['PV → Charge',   `${fmt(s.pvToLoadMWh,3)} MWh`],
+    ['PV → BESS',     `${fmt(s.pvToBessMWh,3)} MWh`],
+    ['BESS → Charge', `${fmt(s.bessDischargeMWh,3)} MWh`],
+    ['Grid → Charge', `${fmt(s.gridToLoadMWh,3)} MWh`],
+    ['Grid → BESS',   `${fmt(s.gridToBessMWh,3)} MWh`],
+    ['Wheeling',      `${fmt(s.wheelingMWh,3)} MWh`],
+    ['SoC début',     `${fmt(s.socStartPercent,2)}%`],
+    ['SoC fin',       `${fmt(s.socEndPercent,2)}%`],
+    ['Coût heure',    `${fmt(s.costDh,1)} DH`],
+    ['Gain heure',    `${fmt(s.baselineCostDh-s.costDh,1)} DH`],
+  ].map(([l,v])=>`<span>${esc(l)}</span><span>${esc(v)}</span>`).join(''));
+}
+
+function renderSummary(s, h) {
+  const items = [
+    ['Timestamp',  s.timestamp],
+    ['Hour index', String(h+1)],
+    ['Jour',       `${s.dayNumber}/365`],
+    ['Heure',      `${String(s.hourOfDay).padStart(2,'0')}h`],
+    ['PV MW',      fmt(s.pvMW,2)],
+    ['Charge MW',  fmt(s.loadMW,2)],
+    ['BESS MW',    sgn(s.bessPowerMW,2)],
+    ['SoC %',      fmt(s.socPercent,1)],
+    ['Grid MW',    fmt(s.gridImportMW,2)],
+    ['Wheeling',   fmt(s.wheelingMW,2)],
+    ['Tarif',      s.tariff],
+    ['Mode EMS',   s.emsMode],
+    ['Commande',   s.command],
+    ['Bilan',      s.energyBalanceOk?'OK':'ERREUR'],
+  ];
+  htm('currentHourSummary', items.map(([l,v])=>
+    `<div class="summary-item"><div class="summary-label">${esc(l)}</div><div class="summary-value">${esc(v)}</div></div>`
+  ).join(''));
+}
+
+// --- LOG ---
+function appendLog(s, h) {
+  if (lastLogged === h) return;
+  lastLogged = h;
+  const bal = s.energyBalanceOk ? 'OK' : 'ERROR';
+  const gainDh = s.baselineCostDh - s.costDh;
+  const tc = s.tariff==='Pointe'?'pointe':s.tariff==='Pleines'?'pleines':'creuses';
+  const hasAlarm = s.gridImportMW>=20 || s.socPercent<=12 || !s.energyBalanceOk;
+  visibleLog.push({
+    mode: s.emsMode, hasAlarm, hasBalanceError: !s.energyBalanceOk, isEvent: false,
+    html: `<tr class="latest-row">
+      <td>${esc(s.timestamp)}</td><td>${h+1}</td>
+      <td>${fmt(s.pvMWh,3)}</td><td>${fmt(s.loadMWh,3)}</td>
+      <td>${fmt(s.pvToLoadMWh,3)}</td><td>${fmt(s.pvToBessMWh,3)}</td>
+      <td>${fmt(s.bessDischargeMWh,3)}</td><td>${fmt(s.gridToLoadMWh,3)}</td>
+      <td>${fmt(s.gridToBessMWh,3)}</td><td>${fmt(s.wheelingMWh,3)}</td>
+      <td>${sgn(s.bessPowerMW,2)}</td>
+      <td>${fmt(s.socStartPercent,1)}</td><td>${fmt(s.socEndPercent,1)}</td>
+      <td><span class="log-badge ${tc}">${esc(s.tariff)}</span></td>
+      <td><span class="log-badge mode">${esc(s.emsMode)}</span></td>
+      <td>${esc(s.command)}</td>
+      <td>${fmt(s.costDh,1)}</td><td>${fmt(gainDh,1)}</td>
+      <td>${fmt(s.cumulativeGainDh,1)}</td>
+      <td><span class="${bal==='OK'?'balance-ok':'balance-error'}">${bal}</span></td>
+    </tr>`
+  });
+  if (visibleLog.length > 500) visibleLog.shift();
+  renderLog();
+}
+
+function renderLog() {
+  const f = visibleLog.filter(r => {
+    if (activeLogFilter === 'all') return true;
+    if (activeLogFilter === 'alarms') return r.hasAlarm;
+    if (activeLogFilter === 'balance') return r.hasBalanceError;
+    return r.mode === activeLogFilter;
+  });
+  const tb = el('minuteLogBody');
+  if (tb) tb.innerHTML = f.map((r,i)=>r.html.replace('latest-row', i===f.length-1?'latest-row':'')).join('');
+  const ld = document.querySelector('.minute-log');
+  const as = el('autoScrollLog');
+  if (ld && as?.checked) ld.scrollTop = ld.scrollHeight;
+}
+
+// --- KPIS ---
+function renderKpis() {
+  if (!hourStates.length) return;
+  const last = hourStates[hourStates.length-1];
+  let tPv=0,tLoad=0,tGrid=0,tChg=0,tDis=0,tWhl=0,errs=0;
+  for (const s of hourStates) {
+    tPv+=s.pvMWh; tLoad+=s.loadMWh; tGrid+=s.gridImportMWh;
+    tChg+=s.bessChargeMWh; tDis+=s.bessDischargeMWh; tWhl+=s.wheelingMWh;
+    if (!s.energyBalanceOk) errs++;
+  }
+  txt('excelKpis', [
+    `PV total: ${fmt(tPv,1)} MWh`,
+    `Charge OCP: ${fmt(tLoad,1)} MWh`,
+    `Import réseau: ${fmt(tGrid,1)} MWh`,
+    `Charge BESS: ${fmt(tChg,1)} MWh | Décharge: ${fmt(tDis,1)} MWh`,
+    `Wheeling: ${fmt(tWhl,1)} MWh`,
+    `Cycles BESS: ${fmt(tChg/BESS_CAPACITY_MWH,2)}`,
+    `SoC final: ${fmt(last.socEndPercent,1)}%`,
+    `Coût EMS: ${fmt(last.cumulativeEmsCostDh,0)} DH`,
+    `Baseline: ${fmt(last.cumulativeBaselineCostDh,0)} DH`,
+    `Gain total: ${fmt(last.cumulativeGainDh,0)} DH`,
+    `Erreurs bilan: ${errs}`,
+  ].join('\n'));
+}
+
+// --- CHARTS ---
+function renderCharts() {
+  activeCharts.forEach(c => c.destroy());
+  activeCharts = [];
+  if (!hourStates.length) return;
+  const view = getView();
+  chartWinStart = view.start;
+  const V = fn => view.states.map((s,i) => view.start+i <= currentHour ? fn(s) : null);
+  const mk = (id, datasets, yTitle, stacked=false) => {
+    const c = el(id); if (!c) return;
+    activeCharts.push(new Chart(c, {
+      type: 'line',
+      data: { labels: view.labels, datasets },
+      options: {
+        responsive:true, maintainAspectRatio:false, animation:false,
+        interaction:{intersect:false,mode:'index'},
+        plugins:{
+          legend:{display:true,position:'bottom',labels:{color:'#9fb2c6',boxWidth:10,font:{size:10}}},
+          tooltip:{callbacks:{label:ctx=>`${ctx.dataset.label}: ${fmt(+ctx.raw,2)} ${yTitle}`}}
+        },
+        scales:{
+          x:{grid:{color:'rgba(148,163,184,0.12)'},ticks:{color:'#6f849b',maxRotation:0,autoSkip:true,font:{size:9}}},
+          y:{stacked,grid:{color:'rgba(148,163,184,0.12)'},ticks:{color:'#6f849b',font:{size:9}}}
+        }
+      }
+    }));
+  };
+  const ds = (label, data, color, stack) => ({
+    label, data, borderColor:color, backgroundColor:color+'5a',
+    borderWidth:1.5, pointRadius:0, tension:0.12, fill:!!stack, stack
+  });
+
+  mk('loadSupplyChart',   [ds('PV→Load',V(s=>s.pvToLoadMW),'#f59e0b','ls'),ds('BESS→Load',V(s=>s.bessToLoadMW),'#818cf8','ls'),ds('Grid→Load',V(s=>s.gridToLoadMW),'#ef4444','ls')], 'MW', true);
+  mk('bessChargeChart',   [ds('Charge',V(s=>Math.max(0,s.bessPowerMW)),'#22c55e'),ds('Décharge',V(s=>Math.min(0,s.bessPowerMW)),'#ef4444')], 'MW');
+  mk('pvAllocationChart', [ds('PV→Load',V(s=>s.pvToLoadMW),'#f59e0b','pv'),ds('PV→BESS',V(s=>s.pvToBessMW),'#818cf8','pv'),ds('Wheeling',V(s=>s.wheelingMW),'#22c55e','pv')], 'MW', true);
+  mk('gridBreakdownChart',[ds('Grid→Load',V(s=>s.gridToLoadMW),'#ef4444'),ds('Grid→BESS',V(s=>s.gridToBessMW),'#f59e0b'),ds('Total',V(s=>s.gridImportMW),'#e5e7eb')], 'MW');
+  mk('socChart',          [ds('SoC %',V(s=>s.socPercent),'#8b5cf6')], '%');
+  mk('economicChart',     [ds('Baseline',V(s=>s.cumulativeBaselineCostDh),'#94a3b8'),ds('EMS',V(s=>s.cumulativeEmsCostDh),'#f59e0b'),ds('Gain cumulé',V(s=>s.cumulativeGainDh),'#22c55e')], 'DH');
+  mk('hourCostChart',     [ds('Baseline DH/h',V(s=>s.baselineCostDh),'#94a3b8'),ds('EMS DH/h',V(s=>s.costDh),'#f59e0b'),ds('Gain DH/h',V(s=>s.baselineCostDh-s.costDh),'#22c55e')], 'DH/h');
+  updateBadges();
+}
+
+function updateChartsLive() {
+  if (!activeCharts.length) { renderCharts(); return; }
+  const view = getView();
+  if (view.start !== chartWinStart || activeCharts[0]?.data?.labels?.length !== view.labels.length) {
+    renderCharts(); return;
+  }
+  activeCharts.forEach(c => { c.data.labels = view.labels; c.update('none'); });
+  updateBadges();
+}
+
+function getView() {
+  if (chartWindowMode === 'year') {
+    const st = hourStates.filter((_,i) => i%24===0 && i<=currentHour);
+    return { states:st, labels:st.map((_,i)=>`J${i+1}`), start:0 };
+  }
+  const ds = Math.floor(currentHour/24)*24;
+  let start=ds, end=Math.min(currentHour, ds+23);
+  if (chartWindowMode==='24h') { start=Math.max(0,currentHour-23); end=currentHour; }
+  if (chartWindowMode==='7d')  { start=Math.max(0,currentHour-167); end=currentHour; }
+  const st = hourStates.slice(start, end+1);
+  return { states:st, labels:st.map((s,i)=>st.length<=48||i%24===0?s.timeLabel:''), start };
+}
+
+function updateBadges() {
+  const s = hourStates[currentHour]; if (!s) return;
+  txt('supplyMixLatest',    `PV ${fmt(s.pvToLoadMW,1)} | BESS ${fmt(s.bessToLoadMW,1)} | Grid ${fmt(s.gridToLoadMW,1)} MW`);
+  txt('bessPowerLatest',    `${s.bessPowerMW>=0?'Charge':'Décharge'} ${sgn(s.bessPowerMW,1)} MW`);
+  txt('pvAllocationLatest', `Load ${fmt(s.pvToLoadMW,1)} | BESS ${fmt(s.pvToBessMW,1)} | Wheel ${fmt(s.wheelingMW,1)} MW`);
+  txt('gridBreakdownLatest',`Load ${fmt(s.gridToLoadMW,1)} | BESS ${fmt(s.gridToBessMW,1)} | Total ${fmt(s.gridImportMW,1)} MW`);
+  txt('socLatest',          `${fmt(s.socPercent,1)}%`);
+  txt('economicLatest',     `Gain ${fmt(s.cumulativeGainDh,0)} DH`);
+  txt('hourCostLatest',     `Base ${fmt(s.baselineCostDh,1)} | EMS ${fmt(s.costDh,1)} | Gain ${fmt(s.baselineCostDh-s.costDh,1)} DH/h`);
+}
+
+// --- SIMULATION CONTROLS ---
+function startSim() {
+  const speed = el('speedSelect')?.value || '1';
+  badge('emsStatusBadge','RUNNING','running');
+  if (speed === 'instant-full') {
+    pauseSim(false);
+    currentHour = hourStates.length-1;
+    renderHour(currentHour);
+    badge('emsStatusBadge','EMS READY','ready');
+    return;
+  }
+  if (speed === 'instant') {
+    pauseSim(false); runDay();
+    badge('emsStatusBadge','EMS READY','ready'); return;
+  }
+  pauseSim(false);
+  timerId = setInterval(() => step(Number(speed)), 1000);
+}
+
+function pauseSim(upd=true) {
+  if (timerId) { clearInterval(timerId); timerId=null; }
+  if (upd) badge('emsStatusBadge','PAUSED','paused');
+}
+
+function step(n) {
+  currentHour = Math.max(0, Math.min(hourStates.length-1, currentHour+n));
+  renderHour(currentHour);
+  if (currentHour >= hourStates.length-1) {
+    pauseSim();
+    badge('emsStatusBadge','SIMULATION COMPLÈTE','ready');
+  }
+}
+
+function runDay() {
+  currentHour = Math.min(hourStates.length-1, Math.floor(currentHour/24)*24+23);
+  renderHour(currentHour);
+}
+
+function exportCsv() {
+  if (!hourStates.length) return;
+  const hdr = 'timestamp,h,day,pv_mwh,load_mwh,pv_load,pv_bess,bess_load,grid_load,grid_bess,wheeling,bess_mw,soc_start,soc_end,tariff,mode,cmd,cost_dh,base_dh,gain_dh,cumul_gain,balance';
+  const rows = hourStates.map(s => [
+    s.timestamp,s.dayNumber,s.dayNumber,
+    fmt(s.pvMWh,3),fmt(s.loadMWh,3),fmt(s.pvToLoadMWh,3),fmt(s.pvToBessMWh,3),
+    fmt(s.bessDischargeMWh,3),fmt(s.gridToLoadMWh,3),fmt(s.gridToBessMWh,3),fmt(s.wheelingMWh,3),
+    fmt(s.bessPowerMW,2),fmt(s.socStartPercent,1),fmt(s.socEndPercent,1),
+    s.tariff,s.emsMode,s.command,
+    fmt(s.costDh,2),fmt(s.baselineCostDh,2),fmt(s.baselineCostDh-s.costDh,2),fmt(s.cumulativeGainDh,2),
+    s.energyBalanceOk?'OK':'ERROR'
+  ].join(','));
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([[hdr,...rows].join('\n')],{type:'text/csv'}));
+  a.download = excelLoaded ? 'ocp_ems_2025_reel.csv' : 'ocp_ems_2025_demo.csv';
+  a.click();
+}
+
+// --- WEATHER FORECAST + PV PREDICTION ---
+// Benguerir coordinates
+const BENGUERIR_LAT = 32.23;
+const BENGUERIR_LON = -7.95;
+// PV yield model: MJ/m² → MWh production for 67 MWc plant
+// Based on typical Benguerir PR ~0.78, GHI→GTI factor ~1.12
+const PV_PEAK_MW = 67;
+const PV_PR = 0.78;        // Performance Ratio
+const GHI_TO_GTI = 1.12;   // tilt correction for ~25° south
+const STD_IRRADIANCE = 3.6; // MJ/m² per peak sun hour
+
+// ── STEP 1: extract last 24h simulated data for calibration ───────────────
+function getLast24hStats() {
+  if (currentHour < 1) return null;
+  const start = Math.max(0, currentHour - 23);
+  const slice = hourStates.slice(start, currentHour + 1);
+  const totalPvMWh = slice.reduce((s, h) => s + h.pvMWh, 0);
+  // Hourly shape normalized 0-1 by hour of day
+  const hourlyShape = new Array(24).fill(0);
+  for (const h of slice) hourlyShape[h.hourOfDay] += h.pvMWh;
+  const maxShape = Math.max(...hourlyShape);
+  const normShape = hourlyShape.map(v => maxShape > 0 ? v / maxShape : 0);
+  // Effective PR vs theoretical clear-sky max for Benguerir
+  const theoreticalMaxMWh = 5.5 * PV_PEAK_MW * GHI_TO_GTI * 0.85;
+  const effectivePR = totalPvMWh > 0 ? Math.min(1, totalPvMWh / theoreticalMaxMWh) : PV_PR;
+  return { totalPvMWh, normShape, effectivePR, hoursUsed: slice.length };
+}
+
+// ── STEP 2: predict daily MWh with calibrated PR ──────────────────────────
+function predictWithCalibration(rad, cloud, tmax, calibPR) {
+  const pr         = calibPR || PV_PR;
+  const tempDerate = 1 - Math.max(0, (tmax - 25) * 0.004);
+  const cloudDerate= 1 - (cloud / 100) * 0.75;
+  const gtiKwh     = (rad * GHI_TO_GTI) / 3.6;
+  return Math.max(0, +(gtiKwh * PV_PEAK_MW * pr * tempDerate * cloudDerate).toFixed(1));
+}
+
+// ── STEP 3: build hourly profile using last-24h shape or bell curve ───────
+function buildHourlyProfile(dailyMWh, normShape, month) {
+  const hasShape = normShape && normShape.some(v => v > 0.05);
+  if (hasShape) {
+    const total = normShape.reduce((s, v) => s + v, 0);
+    return normShape.map(v => total > 0 ? +(v / total * dailyMWh).toFixed(3) : 0);
+  }
+  const sunriseH = [7.5,7.2,6.8,6.2,5.8,5.5,5.6,6.0,6.4,6.8,7.2,7.5][month] ?? 6.5;
+  const sunsetH  = [17.5,18.2,18.8,19.5,20.0,20.3,20.2,19.7,19.0,18.2,17.5,17.2][month] ?? 18.5;
+  const peakH = (sunriseH + sunsetH) / 2;
+  const dayLen = sunsetH - sunriseH;
+  const raw = new Array(24).fill(0);
+  let total = 0;
+  for (let h = 0; h < 24; h++) {
+    if (h < sunriseH || h >= sunsetH) continue;
+    const x = (h - peakH) / (dayLen / 4);
+    raw[h] = Math.exp(-0.5 * x * x);
+    total += raw[h];
+  }
+  return raw.map(v => total > 0 ? +(v / total * dailyMWh).toFixed(3) : 0);
+}
+
+// ── STEP 4: fetch Open-Meteo + run prediction ─────────────────────────────
+async function fetchWeatherAndPredict() {
+  const btn = el('fetchWeatherButton');
+  if (btn) { btn.textContent = '⏳ Fetching...'; btn.disabled = true; }
+  txt('weatherSummary', 'Connexion Open-Meteo...');
+
+  // Calibrate from last 24h simulated data
+  const stats      = getLast24hStats();
+  const calibPR    = stats ? stats.effectivePR : PV_PR;
+  const normShape  = stats ? stats.normShape   : null;
+  const hasRealData= stats && stats.totalPvMWh > 1;
+
+  try {
+    const url = `https://api.open-meteo.com/v1/forecast`
+      + `?latitude=${BENGUERIR_LAT}&longitude=${BENGUERIR_LON}`
+      + `&daily=shortwave_radiation_sum,cloud_cover_mean,temperature_2m_max,sunrise,sunset`
+      + `&forecast_days=7&timezone=Africa%2FCasablanca`;
+
+    const res  = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const d    = data.daily;
+
+    // Add confidence column to header if not there
+    const thead = document.querySelector('#forecastTableBody thead tr');
+    if (thead && thead.children.length < 6)
+      thead.innerHTML += `<th style="padding:2px 4px;color:#22c55e;">Conf.</th>`;
+
+    const rows = [];
+    let totalPredMWh = 0;
+    const forecastProfiles = [];
+
+    for (let i = 0; i < d.time.length; i++) {
+      const date    = d.time[i];
+      const rad     = d.shortwave_radiation_sum[i] || 0;
+      const cloud   = d.cloud_cover_mean[i] || 0;
+      const tmax    = d.temperature_2m_max[i] || 30;
+      const sunrise = (d.sunrise[i] || '').slice(11,16) || '--';
+      const sunset  = (d.sunset[i]  || '').slice(11,16) || '--';
+      const month   = new Date(date).getMonth();
+      // Use last-24h shape only for day 1 (most similar to recent conditions)
+      const pvMWh  = predictWithCalibration(rad, cloud, tmax, calibPR);
+      const hourly = buildHourlyProfile(pvMWh, i === 0 ? normShape : null, month);
+      totalPredMWh += pvMWh;
+      forecastProfiles.push({ date, pvMWh, hourly, sunrise, sunset, cloud, rad, tmax });
+
+      // Confidence decreases day by day
+      const conf       = Math.max(30, Math.round(96 - i * 9));
+      const cloudColor = cloud < 30 ? '#f59e0b' : cloud < 60 ? '#ffd166' : '#8ca4bb';
+      const pvColor    = pvMWh > 300 ? '#22c55e' : pvMWh > 150 ? '#f59e0b' : '#94a3b8';
+      const confColor  = conf > 80 ? '#22c55e' : conf > 60 ? '#f59e0b' : '#8ca4bb';
+      rows.push(`<tr style="border-bottom:1px solid #18283a;">
+        <td style="padding:3px 4px;text-align:left;white-space:nowrap;">${date}</td>
+        <td style="padding:3px 4px;text-align:center;color:${cloudColor};">${Math.round(cloud)}%</td>
+        <td style="padding:3px 4px;text-align:center;">${rad.toFixed(1)}</td>
+        <td style="padding:3px 4px;text-align:center;">${tmax.toFixed(1)}</td>
+        <td style="padding:3px 4px;text-align:center;font-weight:900;color:${pvColor};">${pvMWh}</td>
+        <td style="padding:3px 4px;text-align:center;font-size:9px;color:${confColor};">${conf}%</td>
+      </tr>`);
+    }
+
+    const today = forecastProfiles[0];
+    txt('weatherSummary', `☀ ${today.date} | Lever ${today.sunrise} Coucher ${today.sunset} | ☁ ${Math.round(today.cloud)}% | ${today.tmax.toFixed(1)}°C`);
+    txt('sunSummary', `7j total estimé: ${Math.round(totalPredMWh)} MWh | PR calibré: ${(calibPR*100).toFixed(1)}%`);
+    setHtml('forecastRows', rows.join(''));
+    txt('forecastNote', hasRealData
+      ? `✓ Calibré sur ${stats.hoursUsed}h simulées — PV 24h réel: ${stats.totalPvMWh.toFixed(1)} MWh — PR effectif: ${(calibPR*100).toFixed(1)}%`
+      : `⚠ Simulation non lancée — PR théorique: ${(PV_PR*100).toFixed(0)}% (lancez la simulation d'abord pour calibrer)`);
+    el('weatherForecastTable').style.display = 'block';
+    badge('weatherStatus', 'MÉTÉO EN LIGNE', 'online');
+    window._forecastProfiles = forecastProfiles;
+    if (btn) { btn.textContent = '🔄 Refresh forecast'; btn.disabled = false; }
+
+  } catch (err) {
+    console.error(err);
+    txt('weatherSummary', `⚠ ${err.message}`);
+    txt('sunSummary', 'Fonctionne uniquement en ligne (GitHub Pages / Live Server)');
+    badge('weatherStatus', 'MÉTÉO OFFLINE', 'fault');
+    if (btn) { btn.textContent = '🌤 Retry forecast'; btn.disabled = false; }
+  }
+}
+
+
+document.addEventListener('DOMContentLoaded', () => {
+  el('startButton')?.addEventListener('click', startSim);
+  el('pauseButton')?.addEventListener('click', () => pauseSim());
+  el('previousHourButton')?.addEventListener('click', () => { pauseSim(); step(-1); });
+  el('nextHourButton')?.addEventListener('click', () => { pauseSim(); step(1); });
+  el('resetButton')?.addEventListener('click', () => {
+    pauseSim(); currentHour=0;
+    visibleLog=[]; lastLogged=null;
+    renderLog(); renderHour(0);
+    badge('emsStatusBadge','EMS READY','ready');
+  });
+  el('exportCsvButton')?.addEventListener('click', exportCsv);
+  el('exportJsonButton')?.addEventListener('click', exportCsv);
+  el('exportHourlyButton')?.addEventListener('click', exportCsv);
+
+  const fileInput = el('excelFileInput');
+  fileInput?.addEventListener('change', e => {
+    const f = e.target?.files?.[0];
+    if (f) txt('excelStatus', `"${f.name}" sélectionné — cliquez sur "Load Excel data"`);
+  });
+  el('loadExcelButton')?.addEventListener('click', () => {
+    const f = fileInput?.files?.[0];
+    f ? loadExcel(f) : txt('excelStatus','Sélectionnez le fichier Excel (.xlsx) d\'abord');
+  });
+  el('startExcelButton')?.addEventListener('click', () => {
+    const f = fileInput?.files?.[0];
+    f ? loadExcel(f) : txt('excelStatus','Sélectionnez le fichier Excel d\'abord');
+  });
+  el('nextDayButton')?.addEventListener('click', () => { pauseSim(); step(24); });
+  el('runCurrentDayButton')?.addEventListener('click', () => { pauseSim(); runDay(); });
+  el('runFullExcelButton')?.addEventListener('click', () => {
+    pauseSim();
+    currentHour = hourStates.length-1;
+    renderHour(currentHour);
+    badge('emsStatusBadge','SIMULATION COMPLÈTE','ready');
+  });
+  el('resetExcelButton')?.addEventListener('click', () => {
+    pauseSim(); currentHour=0; visibleLog=[]; lastLogged=null;
+    renderLog(); if (hourStates.length) renderHour(0);
+    badge('emsStatusBadge','EMS READY','ready');
+  });
+  el('toggleChartsButton')?.addEventListener('click', () => {
+    const s = el('chartsSection');
+    const col = s?.classList.toggle('charts-collapsed');
+    txt('toggleChartsButton', col ? 'Afficher graphiques' : 'Masquer graphiques');
+    if (!col) activeCharts.forEach(c=>c.resize());
+  });
+  el('clearVisibleLogButton')?.addEventListener('click', () => { visibleLog=[]; lastLogged=null; renderLog(); });
+  el('exportHourLogButton')?.addEventListener('click', exportCsv);
+  el('compactLogButton')?.addEventListener('click', () => {
+    const log = document.querySelector('.minute-log');
+    const col = log?.classList.toggle('compact-log');
+    txt('compactLogButton', col ? 'Show all columns' : 'Compact columns');
+  });
+  document.querySelectorAll('.chart-window').forEach(b => b.addEventListener('click', () => {
+    chartWindowMode = b.dataset.window || 'day';
+    document.querySelectorAll('.chart-window').forEach(x => x.classList.toggle('active', x===b));
+    renderCharts();
+  }));
+  document.querySelectorAll('.log-filter').forEach(b => b.addEventListener('click', () => {
+    activeLogFilter = b.dataset.filter || 'all';
+    document.querySelectorAll('.log-filter').forEach(x => x.classList.toggle('active', x===b));
+    renderLog();
+  }));
+  document.querySelectorAll('#alarmList,#activeAlarmList').forEach(c => c.addEventListener('click', e => {
+    if (e.target?.classList.contains('ack')) {
+      e.target.textContent='ACKED'; e.target.disabled=true;
+      e.target.closest('.alarm')?.classList.add('acknowledged');
+    }
+  }));
+
+  el('fetchWeatherButton')?.addEventListener('click', fetchWeatherAndPredict);
+
+  // Init badges and messages
+  badge('emsStatusBadge','EMS READY','ready');
+  badge('pvgisStatus', 'DEMO MODE', 'warning');
+  badge('weatherStatus','WEATHER PENDING','warning');
+  txt('excelStatus', 'Upload your hourly production data file (.xlsx) to run the simulation');
+  txt('weatherSummary','Click "Fetch 7-day weather forecast" to load live Benguerir météo');
+  txt('sunSummary','Benguerir — 32.23°N 7.95°W | Prediction model ready');
+
+  renderHour(0);
+  renderCharts();
+  renderKpis();
+});
+</script>
 </body>
 </html>
